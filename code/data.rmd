@@ -1,0 +1,98 @@
+---
+title: "Data"
+author: "Your Name"
+date: "2024-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(arrow)
+library(lubridate)
+library(skimr)
+source("code/load_data.R")  # for sampling code if needed
+```
+
+## Load the data
+
+The data for this case study is stored in a Parquet file. We will use the `arrow` package to read the data into R.
+```{r load-data}
+# List the parquet files
+parquet_files <- list.files(
+  "Unit 14 and 15 Case Study 2", 
+  pattern = "yellow_tripdata_2025.*\\.parquet$",
+  full.names = TRUE
+)
+
+# Open all files as a single Arrow Dataset (Lazy loading)
+ds <- open_dataset(parquet_files, format = "parquet")
+
+# Check what we have
+ds$schema
+nrow(ds)  # ~48.7 million rows
+```
+
+## Sampling the data
+
+We'll sample from this dataset to create a manageable subset for our analysis using stratified random sampling to ensure we have all types of trips represented.
+
+```{r}
+set.seed(6306)  # for reproducibility
+```
+
+One confounding variable in tip anaylsis is cash or credit. Cash is largely determined by how much a passanger has in their pocket and we cannot assume it is reliably recorded due taxes prior to July 4, 2025 and manual entry methods. we will assume cash tipping is too confounding to model. 
+
+We will pull two samples to justify our assumption and continue our analysis. One including cash tips and one with only credit card tips.
+
+```{r}
+# 2. Sampling + feature engineering (filter to credit-card trips first)
+#    Use map_batches for memory-safe random sampling on huge data
+#    Adjust the proportion to hit your target sample size (e.g., ~500k rows)
+sampled <- ds %>%
+  filter(payment_type == 1) %>%                     # ONLY credit-card trips have reliable tips
+  select(tpep_pickup_datetime, tpep_dropoff_datetime,
+         trip_distance, passenger_count, PULocationID,
+         DOLocationID, total_amount, tip_amount,
+         VendorID, RatecodeID, congestion_surcharge) %>%  # add your predictors
+  # Optional: stratified sampling by hour & borough (approximate via map_batches)
+  # For true stratified, you could add mutate(strata = paste(hour(tpep_pickup_datetime), floor(PULocationID/100))) 
+  # but random is statistically valid and fast; extend with group_by + slice_sample after a smaller collect() if needed
+  map_batches(~ as.data.frame(.) %>% 
+                sample_frac(0.01)) %>%               # tweak 0.01 until you get ~200k-750k rows
+  collect() %>%
+  mutate(
+    tip_pct = tip_amount / (total_amount - tip_amount + 1e-6),  # avoid div-by-zero
+    pickup_hour = hour(tpep_pickup_datetime),
+    pickup_dayofweek = wday(tpep_pickup_datetime, label = TRUE),
+    trip_duration_min = as.numeric(difftime(tpep_dropoff_datetime, tpep_pickup_datetime, units = "mins")),
+    # Add any other engineered features here (e.g., borough via lookup table on PULocationID)
+    across(c(trip_distance, passenger_count, total_amount), ~ na_if(., 0))  # clean zeros
+  ) %>%
+  filter(trip_duration_min > 0, trip_distance > 0)   # basic cleaning
+
+# Quick size check
+nrow(sampled)  # should be your target sample size
+
+# 3. Power analysis for multiple linear regression
+#    First, run a pilot model on your sample (or a smaller subsample) to estimate effect size
+pilot_model <- lm(tip_pct ~ trip_distance + passenger_count + pickup_hour + 
+                  pickup_dayofweek + total_amount + congestion_surcharge + 
+                  # ... add your other predictors
+                  VendorID, data = sampled)
+
+r_squared <- summary(pilot_model)$r.squared
+f2 <- r_squared / (1 - r_squared)          # Cohen's f² from observed R²
+k <- length(coef(pilot_model)) - 1         # number of predictors (u)
+
+# Solve for required sample size given desired power = 0.80, α = 0.05
+power_result <- pwr.f2.test(u = k,               # predictors
+                            f2 = f2,             # or use Cohen guidelines: 0.02=small, 0.15=medium, 0.35=large
+                            sig.level = 0.05,
+                            power = 0.80)
+required_n <- power_result$v + k + 1           # total N = v + u + 1
+
+cat("Pilot R² =", round(r_squared, 4), 
+    "\nCohen's f² =", round(f2, 3),
+    "\nRequired N for 80% power with", k, "predictors =", round(required_n), "\n")
+
+# If your actual sample is larger than required_n, you're in great shape!
