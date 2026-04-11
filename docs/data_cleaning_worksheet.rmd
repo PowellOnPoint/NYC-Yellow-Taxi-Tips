@@ -1,0 +1,102 @@
+---
+title: "Data Cleaning Worksheet"
+description: "Exploratory data analysis and cleaning steps for the NYC Yellow Taxi dataset."
+author: "Aaron Powell"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    df-print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(knitr)
+source("code/load_data.R")
+source("code/validate_data.R")
+```
+
+# Introduction
+
+This worksheet attempts to perform exploratory data analysis and cleaning steps on the NYC Yellow Taxi dataset. Goals include identifying missing values, outliers, and inconsistencies in the data, and apply appropriate cleaning techniques to prepare the dataset for analysis. The results will be used to create a script that can be applied to the full dataset.
+
+```{r load-data}
+sample = sample_taxi_data() # starting with 750,000 observations
+validate_sample(sample)
+```
+
+Our sample dataset does not significantly differ from the full dataset and appear to represent the population well judging from summary statistics. The only possible difference is mean_trip_distance, which could be influenced by lower end outliers, such as trips with 0 distance, in the population. 
+
+# Missing Values
+
+There are 179,044 observations with NA or missing values in the RatecodeID, passenger_count, store_and_fwd_flag, 
+congestion_surcharge, airport_fee, which is approximately 2.4% of the sample. 
+
+```{r}
+missing_values = sample %>%
+  filter(is.na(RatecodeID) | is.na(passenger_count) | is.na(store_and_fwd_flag) | is.na(congestion_surcharge) | is.na(Airport_fee))
+dim(missing_values)
+```
+
+They appear to all be the same observations. 
+
+```{r}
+set.seed(6306)
+
+non_missing <- sample |> 
+  filter(!is.na(passenger_count))
+
+missing_sample <- missing_values |> 
+  slice_sample(n = 100)
+
+non_missing_sample <- non_missing |> 
+  slice_sample(n = 100)
+
+var.test(
+  missing_sample$total_amount, 
+  non_missing_sample$total_amount
+)
+
+t.test(
+  missing_sample$total_amount, 
+  non_missing_sample$total_amount
+)
+```
+
+Using a 99% confidence interval, there is insufficient evidence to suggest that the mean total amount of trips with missing values is different from the mean total amount of trips without missing values (welch's t-test, p-value = .015). 
+
+```{r}
+var.test(
+  missing_sample$tip_amount, 
+  non_missing_sample$tip_amount
+)
+
+t.test(
+  missing_sample$tip_amount, 
+  non_missing_sample$tip_amount
+)
+```
+
+There is significant evidence to suggest that the mean tip amount of trips with missing values is different from the mean tip amount of trips without missing values (welch's t-test, p-value < .0001). The mean tip amount for trips with missing values is approximately $0.36, while the mean tip amount for trips without missing values is approximately $3.13. 
+
+payment_type = 0 on all observations with missing values, which is flex_fare. 
+
+check if non_missing_values have payment_type = 0
+```{r}
+non_missing %>% filter(payment_type == 0) %>% dim()
+```
+
+Flex fare payment types did not record values for the RatecodeID, passenger_count, store_and_fwd_flag, congestion_surcharge, and airport_fee variables. These variables are not due to data entry errors. Flex flare is an upfront payment option used by third party applications to display taxi fares to customers. These customers may be looking for budget pricing, or the third party application may not promote tipping as much as in person transactions in some ways resulting in the lower mean tip amount.
+
+We'll create a RatecodeID for flexfare transactions as an indicator variable, and impute the other missing values with 0 since they are not applicable to flex fare transactions.
+
+```{r}
+```
+
+
