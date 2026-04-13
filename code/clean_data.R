@@ -9,97 +9,137 @@
 #' raw_sample <- sample_taxi_data(n = 750000)
 #' clean_data <- clean_taxi_data(raw_sample)
 
-# updating from data_cleaning_worksheet.rmd
+library(dplyr)
+library(lubridate)
 
 clean_taxi_data <- function(raw_data) {
-  
-  library(dplyr)
-  library(lubridate)
-  
+
   cat("=== Starting Data Cleaning & Feature Engineering for Tipping Analysis ===\n")
   cat("Input rows:", nrow(raw_data), "\n")
   
   cleaned <- raw_data %>%
-    # 1. Filter to valid tipping records (credit card only)
-    filter(payment_type == 1) %>%
-    filter(!is.na(tip_amount), !is.na(total_amount)) %>%
+    filter(payment_type == 1) %>% # optional see data_cleaning_worksheet
+    filter(!is.na(tip_amount), !is.na(total_amount)) %>% # seed(6306) has none
     
-    # 2. Basic data quality filters (remove obvious errors)
+# 1. Convert coded categorical variables to labels
+    # Special Category Logic for Flex_fare and Unknown
+    mutate(
+      # RatecodeID mapping - comprehensive logic
+      RatecodeID = case_when(
+        RatecodeID == 1 ~ "Standard",
+        RatecodeID == 2 ~ "JFK",
+        RatecodeID == 3 ~ "Newark",
+        RatecodeID == 4 ~ "Nassau",
+        RatecodeID == 5 ~ "Negotiated",
+        RatecodeID == 6 ~ "Group",
+        RatecodeID == 99 ~ "Unknown",
+        is.na(RatecodeID) & 
+        is.na(passenger_count) & 
+        is.na(store_and_fwd_flag) & 
+        is.na(congestion_surcharge) & 
+        is.na(Airport_fee) ~ "Flex_fare",
+        TRUE ~ as.character(RatecodeID)
+      ),
+      # VendorID mapping
+      VendorID = case_when(
+        VendorID == 1 ~ "Creative Mobile Tech",
+        VendorID == 2 ~ "Curb Mobility",
+        VendorID == 6 ~ "Myle Technologies",
+        VendorID == 7 ~ "Helix",
+        TRUE ~ as.character(VendorID)
+      )
+    ) %>%
+    
+    # 2. Quality filters 
     filter(
-      trip_distance > 0,
-      total_amount > 0,
-      fare_amount >= 0,
-      tip_amount >= 0,
-      passenger_count >= 1,
-      passenger_count <= 6,           # realistic max for yellow taxis
-      !is.na(tpep_pickup_datetime),
+      trip_distance > 0, 
+      total_amount > 0, 
+      fare_amount >= 0, 
+      tip_amount >= 0, 
+      # Allow NA passenger_count for Flex_fare rows
+      is.na(passenger_count) | (passenger_count >= 1 & passenger_count <= 6),
+      !is.na(tpep_pickup_datetime), 
       !is.na(tpep_dropoff_datetime)
     ) %>%
     
-    # 3. Feature Engineering - Critical for strong tipping models
+    # 3. Feature Engineering
     mutate(
-      # Response variables (choose one as your target in lm())
-      tip_amount = tip_amount,
-      tip_pct    = tip_amount / (total_amount - tip_amount + 1e-8),  # avoid div-by-zero
+      # Response variables
+      tip_pct    = tip_amount / (total_amount + tip_amount),
       
-      # Time-based features (tipping behavior varies strongly by time)
-      pickup_datetime   = tpep_pickup_datetime,
-      dropoff_datetime  = tpep_dropoff_datetime,
-      pickup_hour       = hour(pickup_datetime),
-      pickup_dow        = wday(pickup_datetime, label = TRUE, abbr = FALSE),
-      pickup_month      = month(pickup_datetime, label = TRUE),
-      is_weekend        = pickup_dow %in% c("Saturday", "Sunday"),
-      is_rush_hour      = pickup_hour %in% c(7, 8, 9, 16, 17, 18),
+      # Time-based features
+      pickup_hour = hour(tpep_pickup_datetime),
+      pickup_dow = wday(tpep_pickup_datetime, label = TRUE, abbr = FALSE),
+      pickup_month = month(tpep_pickup_datetime, label = TRUE),
+      weekend = pickup_dow %in% c("Saturday", "Sunday"),
+      rush_hour = pickup_hour %in% c(16, 17, 18, 19) & !weekend,
+      overnight = pickup_hour %in% c(20, 21, 22, 23, 0, 1, 2, 3, 4, 5),
       
       # Trip characteristics
-      trip_duration_min = as.numeric(difftime(dropoff_datetime, 
-                                              pickup_datetime, 
-                                              units = "mins")),
-      trip_speed_mph    = ifelse(trip_duration_min > 0, 
-                                 (trip_distance / trip_duration_min) * 60, 
-                                 NA),
+      trip_duration_min = as.numeric(difftime(tpep_dropoff_datetime, tpep_pickup_datetime, units = "mins")),
+      trip_speed_mph    = ifelse(trip_duration_min > 0, (trip_distance / trip_duration_min) * 60, NA_real_),
       
-      # Fare and payment features (important predictors of tipping)
-      fare_per_mile     = ifelse(trip_distance > 0, 
-                                 fare_amount / trip_distance, 
-                                 NA),
-      total_fare_ex_tip = total_amount - tip_amount,
-      surcharge_total   = congestion_surcharge + improvement_surcharge + mta_tax,
+      # Fare and payment features 
+      fare_per_mile = ifelse(trip_distance > 0, fare_amount / trip_distance, NA_real_),
+      surcharge_total = coalesce(congestion_surcharge, 0) + 
+                       coalesce(improvement_surcharge, 0) + 
+                       coalesce(mta_tax, 0),
       
-      # Location proxies (PULocationID can be mapped to boroughs later if desired)
-      pu_location_id    = PULocationID,
-      do_location_id    = DOLocationID,
+      # Binary indicators
+      congestion        = coalesce(congestion_surcharge > 0, FALSE),
+      airport           = coalesce(Airport_fee > 0, FALSE),
+      cbd_congestion    = coalesce(cbd_congestion_fee > 0, FALSE),
       
-      # Binary indicators that often influence tipping
-      has_congestion    = congestion_surcharge > 0,
-      airport_trip      = RatecodeID %in% c(2, 3),   # JFK/EWR/Newark airport codes
-      
-      # Log transformations for skewed variables (helpful in linear regression)
+      # Log transformations
       log_trip_distance = log(trip_distance + 1),
-      log_total_fare    = log(total_fare_ex_tip + 1)
+      log_total_amount    = log(total_amount + 1),
+      
+      # Resolve NA values for modeling by assigning "Flex_fare" level
+      passenger_count = if_else(
+        RatecodeID == "Flex_fare", 
+        "Flex_fare", 
+        as.character(coalesce(passenger_count, 1))
+      ),
+      store_and_fwd_flag = if_else(
+        RatecodeID == "Flex_fare", 
+        "Flex_fare", 
+        coalesce(store_and_fwd_flag, "Unknown")
+      )
     ) %>%
     
     # 4. Final quality filters after feature creation
     filter(
       trip_duration_min > 0.5,          # at least 30 seconds
-      trip_duration_min < 180,          # remove extreme outliers (>3 hours)
+      trip_duration_min < 180,          # remove outliers (>3 hours)
       trip_speed_mph < 80,              # unrealistic speeds
-      tip_pct < 1.0                     # tip_pct > 100% is extremely rare and suspicious
+      tip_pct < 1.0                     # tip_pct > 100% is suspicious
     ) %>%
-    
-    # 5. Select final columns for modeling (keeps it tidy)
+  
+    # 5. Select final columns for modeling
     select(
-      tip_amount, tip_pct,
-      trip_distance, trip_duration_min, trip_speed_mph,
-      passenger_count, pickup_hour, pickup_dow, pickup_month,
-      is_weekend, is_rush_hour, airport_trip, has_congestion,
-      fare_per_mile, total_fare_ex_tip, surcharge_total,
-      log_trip_distance, log_total_fare,
-      VendorID, RatecodeID, 
-      pu_location_id, do_location_id,
-      pickup_datetime, dropoff_datetime   # keep for potential time-series work
+      tip_amount, tip_pct, trip_distance, trip_duration_min, trip_speed_mph,
+      passenger_count, pickup_hour, pickup_dow, pickup_month, weekend, 
+      rush_hour, airport, congestion, cbd_congestion, fare_per_mile, 
+      surcharge_total, log_trip_distance, log_total_amount, VendorID, RatecodeID, 
+      PULocationID, DOLocationID, overnight, tpep_pickup_datetime, tpep_dropoff_datetime, 
+      payment_type, store_and_fwd_flag, total_amount
     ) %>%
-    as_tibble()
+
+    mutate(
+      # Explicit factoring with Flex_fare level for variables that have NAs in Flex_fare rows
+      VendorID       = factor(VendorID, 
+                              levels = c("Creative Mobile Tech", "Curb Mobility", 
+                                       "Myle Technologies", "Helix")),
+      RatecodeID     = factor(RatecodeID, 
+                              levels = c("Standard", "JFK", "Newark", "Nassau", 
+                                       "Negotiated", "Group", "Unknown", "Flex_fare")),
+      passenger_count = factor(passenger_count, 
+                              levels = c("1", "2", "3", "4", "5", "6", "Flex_fare")),
+      store_and_fwd_flag = factor(store_and_fwd_flag,
+                                 levels = c("Y", "N", "Flex_fare")),
+      PULocationID   = factor(PULocationID),
+      DOLocationID   = factor(DOLocationID)
+    )
   
   # Summary report
   final_n <- nrow(cleaned)

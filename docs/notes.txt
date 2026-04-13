@@ -1,8 +1,0 @@
-RatecodeID = 99 is NA/null
-12433 + 179044 NA/Null or 99 ratecodeIDs
-QOIs: is mean tips of RatecodeIDs:NA the same as mean tips of all other RatecodeIDs. 
-
-179044 NA or missing values in RatecodeID, passenger_count, store_and_fwd_flag, 
-congestion_surcharge, airport_fee. All same observations
-
-

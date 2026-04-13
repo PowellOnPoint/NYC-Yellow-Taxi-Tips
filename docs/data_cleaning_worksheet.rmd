@@ -20,6 +20,7 @@ library(tidyverse)
 library(knitr)
 source("code/load_data.R")
 source("code/validate_data.R")
+source("code/clean_data.R")
 ```
 
 # Introduction
@@ -96,7 +97,118 @@ Flex fare payment types did not record values for the RatecodeID, passenger_coun
 
 We'll create a RatecodeID for flexfare transactions as an indicator variable, and impute the other missing values with 0 since they are not applicable to flex fare transactions.
 
+# Quality Issues
+
+Running through a few quality checks.
+
 ```{r}
+sample |> 
+  summarize(
+    n_leq_zero = sum(trip_distance <= 0, na.rm = TRUE),
+    total = n(),
+    proportion = n_leq_zero / total
+  )
 ```
 
+Trip distance has 21,648 observations with values less than or equal to 0. Unrealistic
 
+```{r}
+sample |> 
+  summarize(
+    n_leq_zero = sum(total_amount <= 0, na.rm = TRUE),
+    total = n(),
+    proportion = n_leq_zero / total
+  )
+```
+
+Total amount has 14,989 observations with values less than or equal to 0. Unrealistic for a paid trip.
+
+```{r}
+sample |> 
+  summarize(
+    n_leq_zero = sum(fare_amount < 0, na.rm = TRUE),
+    total = n(),
+    proportion = n_leq_zero / total
+  )
+```
+
+Fare amount has 48,837 observations with values less than 0. Does not match fare details on https://www.nyc.gov/site/tlc/passengers/taxi-fare.page
+
+quick check to see if these are all flex fare transactions with missing values in RatecodeID
+
+```{r}
+sample |> 
+  filter(fare_amount < 0) |> 
+  summarize(
+    n_missing_ratecode = sum(is.na(RatecodeID)),
+    total = n()
+  )
+```
+
+Roughly 3/4 of the observations with negative fare amounts are flex fare transactions with missing values in RatecodeID. We'll consider leaving these values in and use fare_amount with caution for predictions.
+
+```{r}
+sample |> 
+  summarize(
+    n_leq_zero = sum(passenger_count <= 0 | passenger_count > 6, na.rm = TRUE),
+    total = n(),
+    proportion = n_leq_zero / total
+  )
+```
+
+Passenger count has 3,947 observations with values less than or equal to 0. 2 observations are greater than 6. 1,553 with 6 passengers. Target range is 1-6 passengers. 
+
+```{r}
+sample |> 
+  summarize(
+    n_leq_zero = sum(tip_amount < 0, na.rm = TRUE),
+    total = n(),
+    proportion = n_leq_zero / total
+  )
+```
+
+26 observations with tip amount less than 0. Unrealistic.
+
+Congestion surcharge, airport fee, cbd_congestion_fee are fixed values so we will use an indicator for modeling. 
+
+# Testing data import
+```{r}
+cleaned_sample = clean_taxi_data(sample)
+dim(cleaned_sample)
+summary(cleaned_sample)
+```
+
+# Payment type review 
+
+We'll sample from this dataset to create a manageable subset for our analysis using stratified random sampling to ensure we have all types of trips represented.
+
+One confounding variable in tip anaylsis is cash or credit. Cash is largely determined by how much a passanger has in their pocket and we cannot assume it is reliably recorded due taxes prior to July 4, 2025 and manual entry methods. we will assume cash tipping is too confounding to model. 
+
+We will pull two samples to justify our assumption and continue our analysis. One including cash tips and one with only credit card tips.
+
+QOI: Is mean tip percentage significantly different between cash, credit card, or flex_rate trips?
+
+```{r}
+set.seed(6306)
+sampled_for_test <- cleaned_sample %>%
+  filter(payment_type %in% c(1, 2)) %>%
+  group_by(payment_type) %>%
+  slice_sample(n = 100) %>%
+  ungroup()
+
+t.test(tip_amount ~ payment_type, data = sampled_for_test)
+
+t.test(tip_pct ~ payment_type, data = sampled_for_test)
+
+mean(cleaned_sample$tip_amount[cleaned_sample$payment_type == 0], na.rm = TRUE)
+mean(cleaned_sample$tip_amount[cleaned_sample$payment_type == 1], na.rm = TRUE)
+mean(cleaned_sample$tip_amount[cleaned_sample$payment_type == 2], na.rm = TRUE)
+```
+
+While there is evidence the mean tip amount for cash is different than credit (p-value < .0001), cash tips are confounded by manual entry and tax polity. 
+
+While there is evidence to suggest the mean tip percentage for flex_fare is difference than credit (welche's t-test, p-value < .0001) there is not enough information to rule out confounding variables such as the type of customer using flex fare and the third party application they are using. 
+
+Cash has a near zero mean tip amount, while credit card tips have a mean tip amount of approximately $4.30 and flex fare tips have a mean tip amount of approximately $0.39. 
+
+We will focus on credit card tips for the rest of our analysis due to the confounding variables in cash and flex fare tips.

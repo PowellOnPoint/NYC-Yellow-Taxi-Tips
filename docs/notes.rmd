@@ -1,0 +1,263 @@
+---
+title: "Modeling Notes"
+description: "Notes and reflections on the modeling process for the NYC Yellow Taxi dataset."
+author: "Aaron Powell"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    df-print: kable
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(car)
+```
+
+```{r}
+source("code/load_data.R")
+source("code/validate_data.R")
+source("code/clean_data.R")
+```
+
+# Load the data
+
+```{r load-data}
+ds = sample_taxi_data(5000)
+validate_sample(ds)
+ds = clean_taxi_data(ds)
+```
+
+# Predicting Tipping Behavior
+
+Can tipping behavior in NYC yellow taxi credit card transactions be predicted based on trip characteristics using linear regression? 
+
+partitian data
+
+```{r partition-data}
+# Set seed for reproducibility
+set.seed(6306)
+
+n_rows <- nrow(ds)
+train_idx <- sample(n_rows, size = round(0.75 * n_rows))
+
+train <- ds[train_idx, ]
+test  <- ds[-train_idx, ]
+```
+
+Review the predictor variables.
+
+```{r}
+# Review the predictor variables
+
+# Identify numeric and categorical predictors
+response <- "tip_amount"
+
+num_vars <- train |> 
+  select(where(is.numeric)) |> 
+  names() |> 
+  setdiff(response)
+
+cat_vars <- train |> 
+  select(where(~is.factor(.) | is.character(.))) |> 
+  names()
+
+# Sample for scatterplots (large dataset)
+set.seed(6306)
+train_sample <- train |> slice_sample(n = 5000)
+
+# Function for numeric predictors - scatterplots vs tip_amount
+plot_numeric <- function(var_name) {
+  train_sample |> 
+    ggplot(aes(x = .data[[var_name]], y = tip_amount)) +
+    geom_point(alpha = 0.12, size = 0.8) +
+    geom_smooth(method = "lm", color = "red", se = FALSE) +
+    labs(
+      title = paste(var_name, "vs tip_amount"),
+      x = var_name,
+      y = "Tip Amount ($)"
+    ) +
+    theme_bw(base_size = 11)
+}
+
+# Function for categorical predictors - boxplots
+plot_categorical <- function(var_name) {
+  train |> 
+    ggplot(aes(
+      x = reorder(.data[[var_name]], tip_amount, FUN = median),
+      y = tip_amount
+    )) +
+    geom_boxplot(outlier.alpha = 0.5) +
+    labs(
+      title = paste("tip_amount by", var_name),
+      subtitle = paste("Levels:", length(unique(train[[var_name]]))),
+      x = NULL,
+      y = "Tip Amount ($)"
+    ) +
+    theme_bw(base_size = 11) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+# Generate and display numeric scatterplots
+num_plots <- map(num_vars, plot_numeric)
+wrap_plots(num_plots, ncol = 3)
+
+# Generate and display categorical boxplots (in batches of 6)
+cat_plots <- map(cat_vars, plot_categorical)
+wrap_plots(cat_plots[1:6], ncol = 2)
+wrap_plots(cat_plots[7:length(cat_plots)], ncol = 2)
+```
+
+trip speed and trip fare look linearily related. Trip speed is derived from trip distance and duration. 
+
+```{r}
+full = lm(tip_amount ~ trip_speed_mph, data = test)
+reduced = lm(tip_amount ~ trip_distance + trip_duration_min, data = test)
+
+anova(full, reduced)
+vif(reduced)
+```
+
+Collinearity between trip_distance and trip_duration_min is moderate and does not justify the significance of the reduction in RSS (partial f-test, p-value < .0001)
+
+```{r}
+full = lm(tip_amount ~ total_amount, data = test)
+reduced = lm(tip_amount ~ trip_distance + trip_duration_min, data = test)
+
+anova(full, reduced)
+vif(reduced)
+```
+
+total_amount explains more of the variance in tip_amount. Base SLR model could be total_amount and run additional models without total_amount for insights. 
+
+```{r}
+slr = lm(tip_pct ~ log(total_amount), data = ds)
+par(mfrow = c(2, 2))
+plot(slr)
+par(mfrow = c(1, 1))
+
+# Histogram with normal distribution overlaid
+hist(slr$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(slr$residuals), sd = sd(slr$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+```
+
+using tip_pct to address non-constant variance and log(0) is imaginary. 
+
+Attempting stepwise with AIC selection (mallow's cp)
+
+```{r}
+# Stepwise Model Selection: Forward vs Backward
+library(MASS)
+
+# Define reasonable candidate predictors
+predictors <- c(
+  "trip_distance", "trip_duration_min", "pickup_hour", "pickup_dow", 
+  "pickup_month", "weekend", "passenger_count", "fare_per_mile", "surcharge_total", 
+  "rush_hour", 'VendorID', "RatecodeID", 'trip_speed_mph', 'cbd_congestion', 'VendorID',
+  "overnight", "PULocationID", "DOLocationID"
+)
+
+full_formula <- as.formula(
+  paste("tip_amount ~", paste(predictors, collapse = " + "))
+)
+
+# Fit full and null models on training data
+full_model <- lm(full_formula, data = train)
+null_model <- lm(tip_amount ~ 1, data = train)
+
+# Backward selection (start with full model, remove variables)
+backward_model <- stepAIC(
+  full_model, 
+  direction = "backward", 
+  trace = 0,          # set to 1 to see steps
+  k = log(nrow(train)) # BIC penalty (stricter than AIC)
+)
+
+# Forward selection (start with null model, add variables)
+forward_model <- stepAIC(
+  null_model,
+  scope = list(upper = full_formula, lower = null_model),
+  direction = "forward",
+  trace = 0,
+  k = log(nrow(train))
+)
+
+# Compare selected models
+cat("Backward selection formula:\n")
+print(formula(backward_model))
+
+cat("\nForward selection formula:\n")
+print(formula(forward_model))
+
+cat("\nBackward AIC:", AIC(backward_model))
+cat("\nForward AIC: ", AIC(forward_model))
+vif(backward_model)
+vif(forward_model)
+```
+
+both forward and backwards now results the same with minor concerns about collinearity. 
+
+```{r}
+par(mfrow = c(2, 2))
+plot(forward_model)
+par(mfrow = c(1,1))
+
+# Histogram with normal distribution overlaid
+hist(forward_model$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(forward_model$residuals), sd = sd(forward_model$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+```
+
+```{r}
+mlr1 = lm(tip_amount ~ trip_distance + trip_duration_min + RatecodeID, data = ds)
+
+par(mfrow = c(2, 2))
+plot(mlr1)
+par(mfrow = c(1,1))
+
+# Histogram with normal distribution overlaid
+hist(mlr1$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(mlr1$residuals), sd = sd(mlr1$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+
+vif(mlr1)
+```
+
+left off with needing to fix some normality problems. Check trip_duration and trip_destance scatterplots for quadratic relationships. 
+
+tip_pct skewed variance. 
+
+# Is tipping dependent on time of day, day of week, or month?
+
