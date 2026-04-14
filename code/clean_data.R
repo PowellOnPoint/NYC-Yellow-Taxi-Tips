@@ -120,7 +120,7 @@ clean_taxi_data <- function(raw_data) {
     ) %>%
   
     # 5. Select final columns for modeling
-    select(
+    dplyr::select(
       tip_amount, tip_pct, trip_distance, trip_duration_min, trip_speed_mph,
       passenger_count, pickup_hour, pickup_dow, pickup_month, weekend, 
       rush_hour, airport, congestion, cbd_congestion, fare_per_mile, 
