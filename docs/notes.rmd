@@ -138,7 +138,9 @@ vif(reduced)
 total_amount explains more of the variance in tip_amount. Base SLR model could be total_amount and run additional models without total_amount for insights. 
 
 ```{r}
-slr = lm(tip_pct ~ log(total_amount), data = ds)
+slr = lm(tip_amount ~ total_amount, data = ds)
+summary(slr)
+
 par(mfrow = c(2, 2))
 plot(slr)
 par(mfrow = c(1, 1))
@@ -185,7 +187,7 @@ null_model <- lm(tip_amount ~ 1, data = train)
 backward_model <- stepAIC(
   full_model, 
   direction = "backward", 
-  trace = 0,          # set to 1 to see steps
+  trace = 1,          # set to 1 to see steps
   k = log(nrow(train)) # BIC penalty (stricter than AIC)
 )
 
@@ -194,7 +196,7 @@ forward_model <- stepAIC(
   null_model,
   scope = list(upper = full_formula, lower = null_model),
   direction = "forward",
-  trace = 0,
+  trace = 1,
   k = log(nrow(train))
 )
 
@@ -233,7 +235,8 @@ curve(dnorm(x, mean = mean(forward_model$residuals), sd = sd(forward_model$resid
 ```
 
 ```{r}
-mlr1 = lm(tip_amount ~ trip_distance + trip_duration_min + RatecodeID, data = ds)
+mlr1 = lm(tip_amount ~ trip_distance + trip_duration_min + RatecodeID, data = train)
+summary(mlr1)
 
 par(mfrow = c(2, 2))
 plot(mlr1)
@@ -255,9 +258,121 @@ curve(dnorm(x, mean = mean(mlr1$residuals), sd = sd(mlr1$residuals)),
 vif(mlr1)
 ```
 
-left off with needing to fix some normality problems. Check trip_duration and trip_destance scatterplots for quadratic relationships. 
+adding any interactions bring multicollinearity issues. Residual plots evidence of long tailed distribution indicatng normality concerns. 
 
-tip_pct skewed variance. 
+```{r}
+ggplot(train, aes(x = trip_distance, y = tip_amount)) +
+  geom_point(alpha = 0.1, size = 0.8) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(
+    title = "Trip Distance vs Tip Amount",
+    x = "Trip Distance (miles)",
+    y = "Tip Amount ($)"
+  ) +
+  theme_bw(base_size = 18)
+```
+
+Near good looking trend line with some notable zero tip values. 
+
+```{r}
+ggplot(train, aes(x = trip_duration_min, y = tip_amount)) +
+  geom_point(alpha = 0.1, size = 0.8) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(
+    title = "Trip Distance vs Tip Amount",
+    x = "Trip Distance (miles)",
+    y = "Tip Amount ($)"
+  ) +
+  theme_bw(base_size = 18)
+```
+
+Trip distance may be skewed due to tip amount being zero at large distances. let's test what the relationship looks like without zero values.
+
+```{r}
+ggplot(train, aes(x = trip_duration_min, y = tip_amount)) +
+  geom_point(alpha = 0.1, size = 0.8) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(
+    title = "Trip Distance vs Tip Amount",
+    x = "Trip Distance (miles)",
+    y = "Tip Amount ($)"
+  ) +
+  theme_bw(base_size = 18)
+```
+
+```{r}
+summary(train$tip_amount)
+hist(train$tip_amount, breaks=100) 
+```
+
+Very large amount of zero tip values. 
+
+Compare rmse mlr1 to a full model of predictors 
+
+```{r}
+library(car)
+full_mod <- lm(tip_amount ~ trip_distance + trip_duration_min + RatecodeID + 
+               pickup_hour + pickup_dow + weekend + rush_hour + 
+               airport + cbd_congestion + fare_per_mile + log_total_amount + 
+               passenger_count + VendorID, 
+               data = train)
+
+summary(full_mod)
+```
+
+good for some insights. looking to add one more variable to get above 60 adjusted r^2
+
+Further investigate why rush_hour did not make it into the model. rush_hour is entangled with trip_distance and trip_duration_min, but by how much? compare rmse mlr1 to a model with rush_hour.
+
+```{r}
+mlr2 = lm(tip_amount ~ trip_distance + trip_duration_min + PULocationID + DOLocationID, data = train)
+summary(mlr2)
+anova(mlr2, mlr1)
+
+par(mfrow = c(2, 2))
+plot(mlr2)
+par(mfrow = c(1,1))
+
+# Histogram with normal distribution overlaid
+hist(mlr2$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(mlr2$residuals), sd = sd(mlr2$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+```
+
+mlr2 better predictive power but more complex and residual plots are not great. Will include in final evaluation.
+
+```{r}
+mlr3 = lm(tip_amount ~ trip_distance + trip_duration_min + pickup_hour + pickup_dow + pickup_month, data = train)
+summary(mlr3)
+anova(mlr3, mlr2)
+
+par(mfrow = c(2, 2))
+plot(mlr3)
+par(mfrow = c(1,1))
+
+# Histogram with normal distribution overlaid
+hist(mlr3$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(mlr3$residuals), sd = sd(mlr3$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+```
+
+While there is evidence pickup time is significant, the f-statistic is less than mlr2 using location predictors.
 
 # Is tipping dependent on time of day, day of week, or month?
 
