@@ -15,32 +15,38 @@ This project analyzes tipping behavior in New York City Yellow Taxis using data 
 
 We focus exclusively on **Yellow Taxi** trip records for one full calendar year (e.g., 2023 or 2024). Data is loaded from PARQUET files using the `arrow` package in R. A focused subset of the data (e.g., specific zones, times of day, or trip types) is used where it improves insight quality and model performance.
 
-Key deliverables include thorough exploratory data analysis (EDA), feature engineering, model diagnostics and assumption checking, interactive visualizations, and an **RShiny dashboard** with a natural language interaction feature (powered by RAG, a fine-tuned model, or both).
-
 ---
 
-## Key Insights (Example Placeholders – Update with Your Actual Findings)
+## Key Insights (In Development)
 
-- **Insight 1**: [Brief description of your first insight, e.g., "Tips are significantly higher during evening hours in Manhattan entertainment zones, particularly for credit card payments."]
-- **Insight 2**: [Brief description of your second insight, e.g., "Longer trips with higher fare amounts show a non-linear relationship with tip percentage, moderated by passenger count and borough."]
+We are currently finalizing two substantive insights supported by visualizations, statistical analysis, and domain context.  
 
-These insights are supported by targeted visualizations, statistical tests, and thoughtful interpretation grounded in the data.
+**Insight 1** (Draft):  
+[To be updated – e.g., Tips are substantially higher for credit-card payments during evening rush hours in Manhattan entertainment zones.]
+
+**Insight 2** (Draft):  
+[To be updated – e.g., Trip distance and fare_per_mile show a non-linear relationship with tip amount, moderated by passenger_count and pickup_borough/time-of-day.]
+
+Detailed supporting visualizations and interpretations are located in `code/03_eda_and_insights.R`.
 
 ---
 
 ## Prediction Model
 
-We built a **linear regression model** (limited to methods covered in MSDS 6306) to predict `tip_amount`.
+**Model**: Multiple linear regression (using methods covered in MSDS 6306) predicting `tip_amount`.
 
-- **Performance**: RMSE = [Your value ≤ 2], MAE = [Your value ≤ 1.5]
-- **Features**: [List key predictors after selection and engineering, e.g., trip_distance, fare_amount, passenger_count, pickup_hour, PULocationID (as factor or selected zones), payment_type, etc.]
+**Current Status**: Models built and under evaluation (see latest commit “models built”).
+
+**Planned / In-Progress Details**:
+- **Performance Target**: RMSE ≤ 2.0 | MAE ≤ 1.5  
+- **Key Features**: trip_distance, fare_amount (or derived fare_per_mile), passenger_count, pickup_hour, pickup_dow, airport indicator, payment_type, and engineered variables (log transformations, time-of-day bins, interactions)
 - **Techniques Applied**:
-  - Feature engineering (e.g., time-of-day bins, log transformations, interaction terms)
+  - Feature engineering and variable selection
   - Outlier detection and handling
-  - Assumption checks (linearity, normality of residuals, homoscedasticity, multicollinearity via VIF)
-  - Variable selection process
+  - Full assumption checking (linearity, residual normality, homoscedasticity, multicollinearity via VIF)
+  - Diagnostic plots and influence measures
 
-Full model diagnostics and evaluation are in the `code/` directory.
+Full modeling code, diagnostics, and evaluation are in `code/04_modeling.R`.
 
 ---
 
@@ -61,21 +67,31 @@ The natural language feature is grounded in the project’s analysis, model coef
 
 ```bash
 NYC-Yellow-Taxi-Tips/
-├── data/                  # Raw and processed PARQUET/CSV files (gitignore large raw files if needed)
-│   └── yellow_tripdata_YYYY-MM.parquet   # Example files
+├── data/                          # Raw and processed PARQUET/CSV files
 ├── code/
-│   ├── 01_load_data.R             # Reading PARQUET with arrow
-│   ├── 02_data_cleaning.R         # Cleaning, tip variable definition
-│   ├── 03_eda_and_insights.R      # Visualizations and insight development
-│   ├── 04_modeling.R              # Linear regression, diagnostics, evaluation
-│   └── 05_shiny_prep.R            # Data prep for dashboard
+│   ├── load_data.R                # Reading PARQUET with arrow
+│   ├── data_cleaning.R            # Cleaning, tip variable definition
+│   ├── validate_data.R            # Visualizations and insight developmentn
 ├── shiny_app/
 │   ├── app.R                      # Main Shiny application
 │   ├── ui.R / server.R            # (if modular)
-│   ├── rag_or_llm/                # Folder for RAG setup or fine-tuned model components
-│   └── www/                       # CSS, images, etc.
-├── outputs/                       # Saved plots, model objects, tables
-├── docs/                          # Presentation deck PDF, video link, report
+│   └── rag/                       # Folder for RAG setup or fine-tuned model components
+├── docs/                          # Presentation deck, video link, notes
 ├── README.md
 └── LICENSE
 ```
+
+## Data Source
+
+NYC Taxi & Limousine Commission (TLC) – Yellow Taxi Trip Records
+https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+
+## Author
+
+Aaron Powell – MSDS Candidate, Southern Methodist University
+
+# Acknowledgments
+
+Course instructors: Dr. Bivin Sadler 
+Dataset: [NYC Taxi & Limousine Commission (TLC)](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) – Yellow Taxi Trip Records 
+Special thanks to the SMU MSDS program

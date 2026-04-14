@@ -1,6 +1,6 @@
 ---
-title: "Modeling Notes"
-description: "Notes and reflections on the modeling process for the NYC Yellow Taxi dataset."
+title: "EDA Notes"
+description: "Notes and reflections"
 author: "Aaron Powell"
 date: today
 format:
