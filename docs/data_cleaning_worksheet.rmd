@@ -18,9 +18,12 @@ format:
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(tidyverse)
 library(knitr)
-source("code/load_data.R")
-source("code/validate_data.R")
-source("code/clean_data.R")
+library(here)
+
+# Source utility functions using project root (fixes path issues when rendering from docs/)
+source(here::here("code", "load_data.R"))
+source(here::here("code", "validate_data.R"))
+source(here::here("code", "clean_data.R"))
 ```
 
 # Introduction

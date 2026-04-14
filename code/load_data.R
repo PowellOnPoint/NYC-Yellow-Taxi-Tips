@@ -6,14 +6,15 @@
 #'
 #' @param n Target sample size (default 750000). 
 #' @param data_dir Directory containing the yellow_*.parquet files 
-#'                 (default "data/")
+#'                 (default here::here("data"))
 #' @param seed Random seed for reproducibility (default 6306)
 #' @return A tibble containing the raw sampled rows
 
-sample_taxi_data <- function(n = 750000, data_dir = "data/", seed = 6306) {
+sample_taxi_data <- function(n = 750000, data_dir = here::here("data"), seed = 6306) {
   set.seed(seed)
   library(arrow)
   library(dplyr)
+  library(here)
   
   cat("NYC Yellow Taxi Sampling Module\n")
   cat("Target sample size :", n, "rows\n")

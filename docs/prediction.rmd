@@ -16,9 +16,12 @@ format:
 library(tidyverse)
 library(car)
 library(broom)
-source("code/load_data.R")
-source("code/validate_data.R")
-source("code/clean_data.R")
+library(here)
+
+# Source utility functions using project root 
+source(here::here("code", "load_data.R"))
+source(here::here("code", "validate_data.R"))
+source(here::here("code", "clean_data.R"))
 set.seed(6306)
 ```
 

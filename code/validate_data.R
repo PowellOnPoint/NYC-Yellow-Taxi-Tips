@@ -3,9 +3,10 @@
 # for large samples, even small differences can be significant
 # Update as insights develop
 
-validate_sample <- function(sample_df, data_dir = "data/") {
+validate_sample <- function(sample_df, data_dir = here::here("data")) {
   library(arrow)
   library(dplyr)
+  library(here)
   
   ds <- open_dataset(list.files(data_dir, pattern = "^yellow_.*\\.parquet$", full.names = TRUE))
   
