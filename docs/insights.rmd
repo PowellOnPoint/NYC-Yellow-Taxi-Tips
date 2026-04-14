@@ -1,4 +1,147 @@
+---
+title: "Insightsr"
+description: "NYC Yellow Taxi Tipping Behavior"
+author: "Aaron Powell"
+date: today
+format:
+  html:
+    toc: true
+    toc-location: left
+    number-sections: true
+    code-tools: true
+    df-print: kable
+---
 
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)
+library(broom)
+source("code/load_data.R")
+source("code/validate_data.R")
+source("code/clean_data.R")
+set.seed(6306)
+```
 
+```{r}
+ds = sample_taxi_data(n=5000)
+validate_sample(ds)
+ds = clean_taxi_data(ds)
+```
 
-for insights on indicators like rush_hour, time of day, PU and DO locations, seasonality or vendors. 
+# Airport Analysis
+
+```{r}
+# Aggregate stats
+library(knitr)
+insight1 <- ds |>
+  group_by(RatecodeID) |>
+  summarise(n = n(),
+            mean_tip = mean(tip_amount),
+            median_tip = median(tip_amount),
+            pct_zero_tip = mean(tip_amount == 0),
+            .groups = "drop")
+
+insight1 |> kable(caption = "Tipping by Ratecode (JFK vs Standard)")
+
+# Visualization (excluding Unknown)
+ds |>
+  filter(RatecodeID != "Unknown") |>
+  ggplot(aes(x = RatecodeID, y = tip_amount)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  labs(title = "Tip Amount by RatecodeID (Airport vs Standard)",
+       subtitle = "Higher tips on JFK trips") +
+  theme_bw(base_size = 18)
+```
+
+# Temporal analysis
+
+```{r}
+insight2 <- ds |>
+  group_by(rush_hour, overnight, pickup_dow) |>
+  summarise(mean_tip = mean(tip_amount),
+            n = n(),
+            .groups = "drop")
+
+insight2 |> kable()
+
+# Day of week comparison
+ds |>
+  ggplot(aes(x = pickup_dow, y = tip_amount, fill = rush_hour)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  labs(title = "Tip Amount by Day of Week",
+       subtitle = "Rush-hour effect across days") +
+  theme_bw(base_size = 18)
+
+# Insight 2: Temporal Patterns – Rush Hour, Overnight, and Day of Week
+
+# Aggregate mean tip by hour, day type, and rush/overnight 
+temporal_summary <- ds |>
+  mutate(
+    day_type = if_else(pickup_dow %in% c("Saturday", "Sunday"), "Weekend", "Weekday"),
+    time_period = case_when(
+      overnight ~ "Overnight",
+      rush_hour ~ "Rush Hour",
+      TRUE ~ "Other"
+    )
+  ) |>
+  group_by(pickup_hour, day_type, time_period) |>
+  summarise(
+    mean_tip = mean(tip_amount, na.rm = TRUE),
+    median_tip = median(tip_amount, na.rm = TRUE),
+    n = n(),
+    se = sd(tip_amount, na.rm = TRUE) / sqrt(n),   # for error bands
+    .groups = "drop"
+  )
+
+# 1. Heatmap
+p1 <- ggplot(temporal_summary, aes(x = pickup_hour, y = day_type, fill = mean_tip)) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  scale_fill_gradient2(
+    low = "#f7fbff", mid = "#6baed6", high = "#08306b",
+    midpoint = median(temporal_summary$mean_tip),
+    name = "Mean Tip ($)"
+  ) +
+  scale_x_continuous(breaks = seq(0, 23, by = 2)) +
+  labs(
+    title = "Mean Tip Amount by Hour of Day and Day Type",
+    subtitle = "Rush-hour and overnight premiums",
+    x = "Pickup Hour (0–23)",
+    y = NULL
+  ) +
+  theme_bw(base_size = 18) +
+  theme(
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+
+# 2. Line plot with confidence bands
+p2 <- ggplot(temporal_summary, aes(x = pickup_hour, y = mean_tip, color = day_type, group = day_type)) +
+  geom_line(linewidth = 1.1) +
+  geom_ribbon(aes(ymin = mean_tip - 1.96 * se, ymax = mean_tip + 1.96 * se, fill = day_type),
+              alpha = 0.15, color = NA) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Weekday" = "#1f77b4", "Weekend" = "#ff7f0e")) +
+  scale_fill_manual(values = c("Weekday" = "#1f77b4", "Weekend" = "#ff7f0e")) +
+  scale_x_continuous(breaks = seq(0, 23, by = 2)) +
+  labs(
+    title = "Average Tip Amount Over the Day",
+    subtitle = "Weekday vs Weekend",
+    x = "Pickup Hour",
+    y = "Mean Tip Amount ($)",
+    color = "Day Type",
+    fill = "Day Type"
+  ) +
+  theme_bw(base_size = 18) +
+  theme(legend.position = "bottom")
+
+# Combine with patchwork (clean layout)
+library(patchwork)
+p1 / p2 + plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(
+    title = "Insight 2: Tipping Behavior Varies Significantly by Time of Day and Day of Week",
+    caption = "Data: NYC Yellow Taxi credit-card trips | Sample size shown in aggregation"
+  )
+
+# Optional: Save high-res version for Shiny app or presentation
+#ggsave("outputs/insight2_temporal_patterns.png", width = 10, height = 8, dpi = 300)
+```
