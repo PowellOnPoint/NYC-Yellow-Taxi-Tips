@@ -2,6 +2,9 @@
 #'
 #' This module takes the raw sampled data from sample_taxi_data() and prepares
 #' it specifically for predicting tipping behavior (tip_amount or tip_pct).
+#' Note: total_amount column is updated to exclude tips (i.e. pre-tip fare
+#' amount including taxes/surcharges). tip_pct is calculated relative to this
+#' updated total_amount.
 #'
 #' @param raw_data A tibble returned by sample_taxi_data()
 #' @return A cleaned and feature-engineered tibble ready for modeling
@@ -64,8 +67,9 @@ clean_taxi_data <- function(raw_data) {
     
     # 3. Feature Engineering
     mutate(
-      # Response variables
-      tip_pct    = tip_amount / (total_amount + tip_amount),
+      # Response variables - update total_amount to exclude tip (credit care payments ha
+      total_amount = total_amount - tip_amount,
+      tip_pct      = tip_amount / total_amount,
       
       # Time-based features
       pickup_hour = hour(tpep_pickup_datetime),
@@ -92,7 +96,7 @@ clean_taxi_data <- function(raw_data) {
       
       # Log transformations
       log_trip_distance = log(trip_distance + 1),
-      log_total_amount    = log(total_amount + 1),
+      log_total_amount  = log(total_amount + 1),
       
       # Resolve NA values for modeling by assigning "Flex_fare" level
       passenger_count = if_else(
