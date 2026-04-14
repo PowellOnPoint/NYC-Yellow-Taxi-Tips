@@ -64,9 +64,9 @@ a_model <- stepAIC(
 
 library(dplyr) # reload correct library
 
-# Exemplify adding next best indicator to stepwise solution
+# Exemplify on overfit model with <2 RMSE goal
 b_model = lm(
-    tip_amount ~ trip_distance + trip_duration_min + RatecodeID + rush_hour,
+    tip_amount ~ trip_distance + trip_duration_min + RatecodeID + trip_distance:RatecodeID + trip_duration_min:RatecodeID,
     data= train)
 ```
 
