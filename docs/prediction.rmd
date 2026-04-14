@@ -1,4 +1,323 @@
+---
+title: "Predictions"
+description: "Modeling process for the NYC Yellow Taxi dataset."
+author: "Aaron Powell"
+date: today
+format:
+  html:
+    toc: true
+    toc-location: left
+    number-sections: true
+    code-tools: true
+    df-print: kable
+---
 
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)
+library(broom)
+source("code/load_data.R")
+source("code/validate_data.R")
+source("code/clean_data.R")
+set.seed(6306)
+```
 
+# Data
 
-for mlr model explaination
+```{r}
+ds = sample_taxi_data(n=5000)
+validate_sample(ds)
+ds = clean_taxi_data(ds)
+train_idx = sample(nrow(ds), size = round(0.75 * nrow(ds)))
+train = ds[train_idx, ]
+test = ds[-train_idx, ]
+```
+
+# Feature Selection
+
+Can tipping behavior in NYC yellow taxi credit card transactions be predicted based on trip characteristics using linear regression? 
+
+During exploratory analysis, scatterplots and boxplots were reviewed for linear relationships against tip_amount. Further investigation revealed total_amount to be the best statistical predictor. Total_amount is a function of all other variables, but mostly trip_distance and trip_duration_min. While we could use total_amount as the single best predictor it does not provide us with practical prediction for customers, executives or investors. Customers know the average tip amount is 17% and will likely tip between 10-20%. Executives want to ensure their employees are supporting in a thriving business of taxi service. Investors need insights. These models will focus on a predictive model for executives which could be applied for business analytics such as compensation reviews or contractor negotiations.
+
+```{r model creation}
+predictors = c(
+    "trip_distance", "trip_duration_min", "pickup_hour", "pickup_dow", 
+    "pickup_month", "weekend", "passenger_count", "fare_per_mile", "surcharge_total", 
+    "rush_hour", 'VendorID', "RatecodeID", 'trip_speed_mph', 'cbd_congestion', 'VendorID',
+    "overnight" # Leaving out PUlocationID and DOLocationID. Unable to find full list of IDs for factoring.
+    )
+# Exemplify overfit with full model
+full_formula <- as.formula(paste("tip_amount ~", paste(predictors, collapse = " + ")))
+full_model <- lm(full_formula, data = train)
+
+# Simpliest model
+slr = lm(tip_amount ~ total_amount, data = train)
+
+library(MASS)     # stepAIC this library select() method conflicts with dplyr
+
+# Best parsimonious fit
+a_model <- stepAIC(
+    full_model, 
+    direction = "both", 
+    trace = 0, 
+    k = log(nrow(train)))  # BIC for parsimony
+
+library(dplyr) # reload correct library
+
+# Exemplify adding next best indicator to stepwise solution
+b_model = lm(
+    tip_amount ~ trip_distance + trip_duration_min + RatecodeID + rush_hour,
+    data= train)
+```
+
+# Diagnostics
+
+Residual plots are review for ensuring linear regression is robust enough to perform well as prediction model. In other words, does the shoe fit?
+
+```{r model residual plots}
+par(mfrow = c(2, 2))
+plot(full_model)
+plot(slr)
+plot(a_model)
+par(mfrow = c(1,1))
+
+# Histogram with normal distribution overlaid
+hist(full_model$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals (Full Model)",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(full_model$residuals), sd = sd(full_model$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+
+# Histogram with normal distribution overlaid
+hist(slr$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals (Simple Model)",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(slr$residuals), sd = sd(slr$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+
+# Histogram with normal distribution overlaid
+hist(a_model$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals (A Model)",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(a_model$residuals), sd = sd(a_model$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
+```
+
+Results are not perfect, there's some skewness in normality and zero tip annotated in the dataset are only slightly in disagreeance with assuming a constant variance among predictor variables. Outliers have been appropriately addressed while leaving room for influence in the model.
+
+# Comparison
+
+Model A provides the best explaination of variance while minimizing complexity. Adding all predictors would only explain 8% more of the variance, while adding the next best predictor would not explain even .1% more. The trade-off is 6 degrees of freedom less than the simpliest model.
+
+```{r model-comparison}
+# Create comparison table from model summaries
+comparison_table <- map_dfr(list(
+    "Full Model" = full_model,
+    "SLR (total_amount)" = slr,
+    "Stepwise BIC (a_model)" = a_model,
+    "Manual (b_model)" = b_model
+  ), ~ {
+    g <- broom::glance(.x)
+    tibble(
+      Model = names(which(map_lgl(list(full_model, slr, a_model, b_model), identical, .x))),
+      Observations = g$nobs,
+      `R²` = round(g$r.squared, 4),
+      `Adj. R²` = round(g$adj.r.squared, 4),
+      `Residual SE` = round(g$sigma, 3),
+      `F-statistic` = round(g$statistic, 2),
+      `p-value` = format.pval(g$p.value, digits = 3, eps = 0.001),
+      `Residual Df` = g$df.residual
+    )
+  }, .id = NULL)
+
+comparison_table |>
+  knitr::kable(
+    caption = "Model Summary Comparison",
+    align = "lrrrrrr"
+  )
+```
+
+There is some expected collinearity between total_distance and total_duration_min but minimal for the dataset. 
+
+```{r vif-comparison}
+# VIF (Variance Inflation Factor) Comparison
+# Note: Full model is too complex for standard VIF due to location IDs (277 predictors)
+
+library(car)
+
+# Named list of models
+models = list(
+    "Full Model" = full_model,
+    "SLR (total_amount)" = slr,
+    "Stepwise BIC (a_model)" = a_model,
+    "Manual (b_model)" = b_model
+    )
+
+# Calculate VIF where feasible
+get_vif_summary <- function(model, name) {
+  if (name == "Full Model") {
+    return(tibble(
+      Model = name,
+      `Max VIF` = NA_real_,
+      `Mean VIF` = NA_real_,
+      `VIF > 5` = NA_integer_,
+      `VIF > 10` = NA_integer_,
+      `Total Predictors` = length(coef(model)) - 1,
+      Notes = "Too complex (includes PULocationID + DOLocationID)"
+    ))
+  }
+  
+  vifs <- tryCatch({
+    vif_values <- vif(model)
+    if (is.matrix(vif_values)) {
+      # For models with categorical variables (GVIF)
+      vif_values[, "GVIF^(1/(2*Df))"]
+    } else {
+      vif_values
+    }
+  }, error = function(e) rep(1, length(coef(model)) - 1))
+  
+  tibble(
+    Model = name,
+    `Max VIF` = round(max(vifs, na.rm = TRUE), 2),
+    `Mean VIF` = round(mean(vifs, na.rm = TRUE), 2),
+    `VIF > 5` = sum(vifs > 5, na.rm = TRUE),
+    `VIF > 10` = sum(vifs > 10, na.rm = TRUE),
+    `Total Predictors` = length(vifs),
+    Notes = ""
+  )
+}
+
+vif_table <- map_dfr(names(models), ~ get_vif_summary(models[[.x]], .x))
+
+vif_table |>
+  knitr::kable(
+    caption = "VIF Comparison Across Models",
+    align = "lrrrrrc",
+    digits = 2
+  )
+```
+
+# Performance
+
+Train Adj. R²: In-sample fit (adjusted for predictors)
+Test RMSE / MAE: How well the model predicts tip_amount on unseen data
+Test R²: Out-of-sample explanatory power
+AIC/BIC: Model selection criteria
+
+```{r model-performance}
+# Generate predictions on held-out test set
+test_preds <- test |>
+  mutate(
+    pred_full = predict(full_model, newdata = test),
+    pred_slr  = predict(slr, newdata = test),
+    pred_a    = predict(a_model, newdata = test),
+    pred_b    = predict(b_model, newdata = test)
+  )
+
+# Helper functions for test set evaluation
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+}
+
+mae <- function(actual, predicted) {
+  mean(abs(actual - predicted), na.rm = TRUE)
+}
+
+rsq <- function(actual, predicted) {
+  1 - sum((actual - predicted)^2, na.rm = TRUE) / 
+      sum((actual - mean(actual, na.rm = TRUE))^2, na.rm = TRUE)
+}
+
+# Comprehensive model evaluation table
+model_evaluation <- tibble(
+  Model = c("Full Model", 
+           "SLR (total_amount)", 
+           "Stepwise BIC (a_model)", 
+           "Manual (b_model)"),
+  
+  `Train Adj. R²` = c(
+    round(summary(full_model)$adj.r.squared, 4),
+    round(summary(slr)$adj.r.squared, 4),
+    round(summary(a_model)$adj.r.squared, 4),
+    round(summary(b_model)$adj.r.squared, 4)
+  ),
+  
+  `Test RMSE` = c(
+    round(rmse(test$tip_amount, test_preds$pred_full), 3),
+    round(rmse(test$tip_amount, test_preds$pred_slr), 3),
+    round(rmse(test$tip_amount, test_preds$pred_a), 3),
+    round(rmse(test$tip_amount, test_preds$pred_b), 3)
+  ),
+  
+  `Test MAE` = c(
+    round(mae(test$tip_amount, test_preds$pred_full), 3),
+    round(mae(test$tip_amount, test_preds$pred_slr), 3),
+    round(mae(test$tip_amount, test_preds$pred_a), 3),
+    round(mae(test$tip_amount, test_preds$pred_b), 3)
+  ),
+  
+  `Test R²` = c(
+    round(rsq(test$tip_amount, test_preds$pred_full), 4),
+    round(rsq(test$tip_amount, test_preds$pred_slr), 4),
+    round(rsq(test$tip_amount, test_preds$pred_a), 4),
+    round(rsq(test$tip_amount, test_preds$pred_b), 4)
+  ),
+  
+  AIC = c(
+    round(AIC(full_model), 1),
+    round(AIC(slr), 1),
+    round(AIC(a_model), 1),
+    round(AIC(b_model), 1)
+  ),
+  
+  BIC = c(
+    round(BIC(full_model), 1),
+    round(BIC(slr), 1),
+    round(BIC(a_model), 1),
+    round(BIC(b_model), 1)
+  )
+)
+
+model_evaluation |>
+  knitr::kable(
+    caption = "Model Performance Evaluation (Training + Held-Out Test Set)",
+    align = "lrrrrrr"
+  )
+```
+
+```{r test-prediction-summary}
+# Summary of test set prediction accuracy
+summary_stats <- test_preds |>
+  summarize(
+    Mean_Actual = mean(tip_amount),
+    Mean_Predicted_Full = mean(pred_full),
+    Mean_Predicted_SLR = mean(pred_slr),
+    Mean_Predicted_B = mean(pred_b),
+    .groups = "drop"
+  )
+
+summary_stats |> knitr::kable(
+  caption = "Mean Predicted vs Actual Tip Amount on Test Set",
+  digits = 3
+)
+```
+
