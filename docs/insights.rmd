@@ -16,9 +16,11 @@ format:
 library(tidyverse)
 library(car)
 library(broom)
-source("code/load_data.R")
-source("code/validate_data.R")
-source("code/clean_data.R")
+
+# Source utility functions using project root 
+source(here::here("code", "load_data.R"))
+source(here::here("code", "validate_data.R"))
+source(here::here("code", "clean_data.R"))
 set.seed(6306)
 ```
 
@@ -134,13 +136,8 @@ p2 <- ggplot(temporal_summary, aes(x = pickup_hour, y = mean_tip, color = day_ty
   theme_bw(base_size = 18) +
   theme(legend.position = "bottom")
 
-# Combine with patchwork (clean layout)
-library(patchwork)
-p1 / p2 + plot_layout(heights = c(1, 1.2)) +
-  plot_annotation(
-    title = "Insight 2: Tipping Behavior Varies Significantly by Time of Day and Day of Week",
-    caption = "Data: NYC Yellow Taxi credit-card trips | Sample size shown in aggregation"
-  )
+p1
+p2
 
 # Optional: Save high-res version for Shiny app or presentation
 #ggsave("outputs/insight2_temporal_patterns.png", width = 10, height = 8, dpi = 300)
