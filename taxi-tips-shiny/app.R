@@ -180,16 +180,12 @@ ui <- dashboardPage(
         fluidRow(
           box(title = "Adjust Inputs for Prediction", width = 6, status = "primary",
               sliderInput("trip_dist", "Trip Distance (miles)", 0, 30, value = 5, step = 0.1),
-              sliderInput("pickup_hr", "Pickup Hour of Day", 0, 23, value = 12),
-              selectInput("pass_count", "Passengers", choices = 1:6, selected = 1),
+              sliderInput("trip_duration", "Trip Duration (minutes)", 0, 120, value = 15, step = 1),
               selectInput("ratecode", "Ratecode", choices = unique(taxi_data$RatecodeID), selected = "1"),
-              checkboxInput("is_weekend", "Weekend Trip?", FALSE),
-              actionButton("predict_btn", "Get Prediction", class = "btn-lg btn-success")
+              checkboxInput("is_weekend", "Weekend Trip?", FALSE)
           ),
           box(title = "Results", width = 6, status = "info",
-              verbatimTextOutput("pred_output"),
-              h4("Model Summary"),
-              verbatimTextOutput("model_summary")
+              verbatimTextOutput("pred_output")
           )
         )
       )
@@ -286,20 +282,21 @@ server <- function(input, output, session) {
     datatable(group_summary)
   })
   
-  observeEvent(input$predict_btn, {
+  # Dynamic prediction reactive
+  predicted_tip <- reactive({
     new_data <- data.frame(
       trip_distance = input$trip_dist,
-      pickup_hour = input$pickup_hr,
-      passenger_count = as.integer(input$pass_count),
+      trip_duration_min = input$trip_duration,
       RatecodeID = as.factor(input$ratecode),
       weekend = input$is_weekend
     )
     pred <- predict(model_fit, newdata = new_data)
-    output$pred_output <- renderText(paste("Predicted Tip: $", round(pred, 2)))
+    paste("Predicted Tip: $", round(pred, 2), "\nProjected Total: $", round(pred / 0.173, 2))
   })
   
-  output$model_summary <- renderPrint({
-    summary(model_fit)
+  output$pred_output <- renderText({
+    predicted_tip()
   })
+  
 }
 shinyApp(ui, server)

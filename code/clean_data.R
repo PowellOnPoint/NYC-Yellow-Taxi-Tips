@@ -94,10 +94,6 @@ clean_taxi_data <- function(raw_data) {
       airport           = coalesce(Airport_fee > 0, FALSE),
       cbd_congestion    = coalesce(cbd_congestion_fee > 0, FALSE),
       
-      # Log transformations
-      log_trip_distance = log(trip_distance + 1),
-      log_total_amount  = log(total_amount + 1),
-      
       # Resolve NA values for modeling by assigning "Flex_fare" level
       passenger_count = if_else(
         RatecodeID == "Flex_fare", 
@@ -124,7 +120,7 @@ clean_taxi_data <- function(raw_data) {
       tip_amount, tip_pct, trip_distance, trip_duration_min, trip_speed_mph,
       passenger_count, pickup_hour, pickup_dow, pickup_month, weekend, 
       rush_hour, airport, congestion, cbd_congestion, fare_per_mile, 
-      surcharge_total, log_trip_distance, log_total_amount, VendorID, RatecodeID, 
+      surcharge_total, VendorID, RatecodeID, 
       PULocationID, DOLocationID, overnight, tpep_pickup_datetime, tpep_dropoff_datetime, 
       payment_type, store_and_fwd_flag, total_amount
     ) %>%
