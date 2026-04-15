@@ -1,0 +1,4 @@
+Insight 1: Tips are higher for longer trips and in certain Ratecodes like JFK airport.
+Insight 2: Nighttime and weekend trips in entertainment zones show higher tip percentages.
+The linear model shows trip_distance as the strongest predictor with positive coefficient.
+From EDA: Average tip is about $4.31 with 17.3% tip rate.

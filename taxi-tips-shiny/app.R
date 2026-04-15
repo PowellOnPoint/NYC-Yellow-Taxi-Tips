@@ -1,224 +1,305 @@
-# =====================================================
-# DS 6306 Final Project - NYC Yellow Taxi Tips Explorer
-# Group: [Your Names] | MSDS Program, Southern Methodist University
-# =====================================================
+# app.R - NYC Yellow Taxi Tips Shiny Dashboard
+# MSDS 6306 Final Project - PowellOnPoint Team
+# Updated with selectable variable plots per requirements
 
 library(shiny)
-library(bslib)
-library(ggplot2)
+library(bs4Dash)      
 library(plotly)
-library(dplyr)
+library(ggplot2)      # Added for custom plots
+library(stringr)
 library(DT)
-library(lubridate)
+library(dplyr)
+library(forcats)
+library(httr2)
+library(tidyr)        # Added for pivot_longer        
 
-# Load data and model
-taxi_data <- readRDS("taxi_cleaned.rds")
-tip_model <- readRDS("tip_model.rds")
+# Load pre-processed assets (now in app directory)
+taxi_data <- readRDS("taxi_cleaned.rds")  
+model_fit <- readRDS("tip_model.rds")           
+knowledge_chunks <- readLines("knowledge_base.txt")
 
-# Knowledge base for Natural Language Chat 
-kb <- data.frame(
-  q = c("insights", "when higher", "time of day", "evening", "distance", "zones", "airport", 
-        "model performance", "rmse", "mae", "predict", "tip amount"),
-  answer = c(
-    "Insight 1: Tips are significantly higher during evening hours (6-10 PM), averaging ~25-30% more than daytime trips. Insight 2: Longer trips and airport pickup zones show substantially higher tip amounts and percentages.",
-    "Tips tend to be higher in the evening (6-10 PM) and on weekends, especially for trips originating from or destined to airport zones.",
-    "Evening hours consistently show the highest average tips across the dataset.",
-    "Evening hours (6-10 PM) show the highest average tips.",
-    "Tip amount increases with trip distance, with a stronger effect for credit card payments and longer rides.",
-    "Certain zones (particularly those near airports and high-end areas) exhibit notably higher tipping behavior.",
-    "Airport-related pickups have among the highest tip percentages in the data.",
-    "The linear regression model achieves RMSE ≈ 1.8 and MAE ≈ 1.3, meeting the project thresholds.",
-    "RMSE is approximately 1.8.",
-    "MAE is approximately 1.3.",
-    "Use the Prediction tab to generate a tip estimate based on trip characteristics.",
-    "The model predicts tip_amount using trip_distance, fare_amount, hour, passenger_count, and weekend indicator."
-  )
-)
+# Define variable lists based on ds dataset for dynamic inputs
+numeric_vars <- c("trip_distance", "tip_amount", "tip_pct", "total_amount", 
+                  "fare_per_mile", "trip_duration_min", "trip_speed_mph", 
+                  "pickup_hour", "log_trip_distance", "log_total_amount")
 
-# UI with modern bslib theme (professional look)
-ui <- page_navbar(
-  title = "NYC Yellow Taxi Tips Explorer",
-  theme = bs_theme(version = 5, bootswatch = "flatly", primary = "#007BFF"),
-  
-  # Tab 1: Insights
-  nav_panel("Insights",
-    fluidRow(
-      column(12, h2("Key Insights on Tipping Behavior")),
-      column(6,
-        h4("Insight 1: Time-of-Day Effect"),
-        img(src = "plots/insight1_time.png", height = "380px", style = "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"),
-        p("Evening rides (especially 6–10 PM) generate significantly higher tips.")
-      ),
-      column(6,
-        h4("Insight 2: Distance & Zone Effect"),
-        img(src = "plots/insight2_zones.png", height = "380px", style = "border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"),
-        p("Longer trips and airport zones show elevated tipping behavior.")
-      )
-    ),
-    hr(),
-    h4("Summary from Analysis"),
-    verbatimTextOutput("insight_summary")
-  ),
-  
-  # Tab 2: Interactive Visualizations
-  nav_panel("Visualizations",
-    sidebarLayout(
-      sidebarPanel(
-        selectInput("hour_filter", "Filter by Pickup Hour Range", 
-                    choices = 0:23, selected = c(0,23), multiple = TRUE),
-        sliderInput("dist_slider", "Trip Distance (miles)", 
-                    min = 0, max = 30, value = c(0, 15), step = 0.5),
-        checkboxInput("weekend_only", "Show Weekend Trips Only", FALSE)
-      ),
-      mainPanel(
-        tabsetPanel(
-          tabPanel("Tip vs Distance", plotlyOutput("plot_dist", height = "420px")),
-          tabPanel("Tips by Hour", plotlyOutput("plot_hour", height = "420px")),
-          tabPanel("Tip % by Day", plotlyOutput("plot_dow", height = "420px"))
-        )
-      )
-    )
-  ),
-  
-  # Tab 3: Prediction Model
-  nav_panel("Prediction Model",
-    h3("Linear Regression – Predict Tip Amount"),
-    sidebarLayout(
-      sidebarPanel(
-        numericInput("pred_dist", "Trip Distance (miles)", 5, min = 0, step = 0.1),
-        numericInput("pred_fare", "Fare Amount ($)", 25, min = 0),
-        numericInput("pred_hour", "Pickup Hour (0-23)", 18, min = 0, max = 23),
-        numericInput("pred_pass", "Number of Passengers", 1, min = 1, max = 6),
-        checkboxInput("pred_weekend", "Weekend Trip?", FALSE),
-        actionButton("predict_btn", "Get Prediction", class = "btn-primary btn-lg")
-      ),
-      mainPanel(
-        h4("Predicted Tip:"),
-        h2(textOutput("prediction_text"), style = "color: #007BFF;"),
-        hr(),
-        h5("Model Performance (meets project requirements)"),
-        verbatimTextOutput("model_perf"),
-        plotOutput("resid_plot", height = "320px")
-      )
-    )
-  ),
-  
-  # Tab 4: Natural Language Interface (Proof-of-Concept RAG)
-  nav_panel("Ask About the Project",
-    h3("Chat with the Project (Natural Language)"),
-    p("Ask questions like: 'When are tips higher?', 'What are the key insights?', 'How good is the model?'"),
-    fluidRow(
-      column(8, textInput("user_q", "", placeholder = "Type your question here...", width = "100%")),
-      column(2, actionButton("ask_btn", "Ask", class = "btn-success", style = "margin-top: 28px;"))
-    ),
-    hr(),
-    h4("Response (grounded in our analysis):"),
-    verbatimTextOutput("chat_answer", placeholder = "Your answer will appear here...")
-  ),
-  
-  # Footer / Resources
-  nav_spacer(),
-  nav_menu(
-    title = "Resources",
-    nav_item(tags$a("View Full Report (.html)", href = "report.html", target = "_blank")),
-    nav_item(tags$a("GitHub Repository", href = "https://github.com/YOURUSERNAME/taxi-tips-project", target = "_blank"))
-  )
-)
+categorical_vars <- c("pickup_dow", "RatecodeID", "passenger_count", "weekend", 
+                      "rush_hour", "airport", "VendorID", "overnight", "PULocationID",
+                      "DOLocationID")
 
-# Server
-server <- function(input, output, session) {
+# Simple embedding/retrieval helper
+get_relevant_context <- function(query, chunks = knowledge_chunks, top_k = 3) {
+  scores <- sapply(chunks, function(c) sum(stringr::str_detect(tolower(c), tolower(strsplit(query, " ")[[1]]))))
+  top_idx <- order(scores, decreasing = TRUE)[1:top_k]
+  paste(chunks[top_idx], collapse = "\n\n")
+}
+
+# HF LLM call (replace YOUR_HF_TOKEN with env var for production)
+call_hf_llm <- function(prompt, model = "mistralai/Mistral-7B-Instruct-v0.3") {
+  req <- request("https://api-inference.huggingface.co/models/") %>%
+    req_url_path_append(model) %>%
+    req_headers("Authorization" = paste("Bearer", Sys.getenv("HF_TOKEN", "YOUR_HF_TOKEN"))) %>%  
+    req_body_json(list(inputs = prompt, parameters = list(max_new_tokens = 300, temperature = 0.7)))
   
-  filtered <- reactive({
-    df <- taxi_data
-    if (input$weekend_only) df <- df %>% filter(is_weekend == TRUE)
-    df %>% filter(hour %in% input$hour_filter,
-                  trip_distance >= input$dist_slider[1],
-                  trip_distance <= input$dist_slider[2])
-  })
-  
-  # Insight summary (customize with your exact wording)
-  output$insight_summary <- renderPrint({
-    cat("1. Evening hours (6-10 PM) show markedly higher tips than daytime.\n",
-        "2. Trip distance and airport/high-end zones are strong positive predictors of tip amount.\n",
-        "These patterns hold after controlling for fare and passenger count.\n")
-  })
-  
-  # Visualizations
-  output$plot_dist <- renderPlotly({
-    p <- filtered() %>%
-      ggplot(aes(x = trip_distance, y = tip_amount)) +
-      geom_point(alpha = 0.35, color = "#007BFF") +
-      geom_smooth(method = "lm", color = "red") +
-      labs(title = "Tip Amount vs Trip Distance", x = "Distance (miles)", y = "Tip ($)") +
-      theme_minimal()
-    ggplotly(p)
-  })
-  
-  output$plot_hour <- renderPlotly({
-    p <- filtered() %>%
-      group_by(hour) %>%
-      summarise(mean_tip = mean(tip_amount, na.rm = TRUE)) %>%
-      ggplot(aes(x = hour, y = mean_tip)) +
-      geom_line(color = "#28a745", linewidth = 1.2) +
-      geom_point(size = 3) +
-      labs(title = "Average Tip by Pickup Hour", y = "Mean Tip ($)") +
-      theme_minimal()
-    ggplotly(p)
-  })
-  
-  output$plot_dow <- renderPlotly({
-    p <- filtered() %>%
-      group_by(day_of_week) %>%
-      summarise(mean_tip_pct = mean(tip_pct, na.rm = TRUE)) %>%
-      ggplot(aes(x = day_of_week, y = mean_tip_pct)) +
-      geom_col(fill = "#ffc107") +
-      labs(title = "Average Tip % by Day of Week", y = "Tip %") +
-      theme_minimal()
-    ggplotly(p)
-  })
-  
-  # Prediction
-  observeEvent(input$predict_btn, {
-    newdata <- data.frame(
-      trip_distance = input$pred_dist,
-      fare_amount = input$pred_fare,
-      hour = input$pred_hour,
-      passenger_count = input$pred_pass,
-      is_weekend = input$pred_weekend
-    )
-    pred_tip <- predict(tip_model, newdata = newdata)
-    output$prediction_text <- renderText({ paste0("$", round(pred_tip, 2)) })
-  })
-  
-  output$model_perf <- renderPrint({
-    cat("RMSE ≈ 1.82\nMAE ≈ 1.28\nBoth meet project thresholds (RMSE ≤ 2, MAE ≤ 1.5)")
-  })
-  
-  output$resid_plot <- renderPlot({
-    plot(tip_model, which = 1, main = "Residuals vs Fitted")
-  })
-  
-  # Natural Language Chat (simple RAG-style)
-  observeEvent(input$ask_btn, {
-    q <- tolower(trimws(input$user_q))
-    if (nchar(q) == 0) {
-      output$chat_answer <- renderText("Please ask a question about the insights, model, or findings.")
-      return()
-    }
-    
-    # Simple similarity match
-    scores <- stringdist::stringdist(q, tolower(kb$q), method = "lv")
-    best <- which.min(scores)
-    
-    if (scores[best] < 12) {   # threshold for good match
-      output$chat_answer <- renderText(kb$answer[best])
-    } else {
-      output$chat_answer <- renderText(
-        "Based on our analysis: Tips are notably higher in evening hours and for longer trips, especially from airport zones. The linear regression model performs well (RMSE ~1.8). Try asking about specific insights or model performance!"
-      )
-    }
+  tryCatch({
+    resp <- req_perform(req)
+    content <- resp_body_json(resp)
+    trimws(content[[1]][[1]]$generated_text)
+  }, error = function(e) {
+    paste("HF API error (check token or rate limits). Using local insight instead:\nTips are higher for longer distances and specific ratecodes like airport trips.")
   })
 }
 
-# Launch the app
-shinyApp(ui = ui, server = server)
+ui <- dashboardPage(
+  dashboardHeader(title = "NYC Taxi Tips Explorer"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Overview", tabName = "overview", icon = icon("home")),
+      menuItem("Scatterplots", tabName = "scatter", icon = icon("chart-line")),
+      menuItem("Boxplots", tabName = "boxplot", icon = icon("box")),
+      menuItem("Histograms", tabName = "histogram", icon = icon("chart-bar")),
+      menuItem("Insights & Viz", tabName = "insights", icon = icon("lightbulb")),
+      menuItem("Tip Predictor", tabName = "predict", icon = icon("calculator"))
+    )
+  ),
+  dashboardBody(
+    tabItems(
+      # Overview
+      tabItem("overview",
+        fluidRow(
+          box(
+            title = "Project Overview", 
+            width = 12,
+            status = "primary",
+            solidHeader = TRUE,
+            HTML("
+              <p><strong>Predicting NYC Yellow Taxi Tips</strong> — MSDS 6306 Final Project at SMU.</p>
+              <p>This dashboard supports two goals:</p>
+              <ol>
+                <li><strong>Prediction</strong>: Linear regression for <code>tip_amount</code></li>
+                <li><strong>Insights</strong>: Interactive visualizations of tipping behavior.</li>
+              </ol>
+              <p>Data from cleaned 2025 Yellow Taxi records. All plots are interactive.</p>
+            ")
+          )
+        ),
+        fluidRow(
+          valueBoxOutput("n_trips", width = 3),
+          valueBoxOutput("avg_tip", width = 3),
+          valueBoxOutput("avg_tip_pct", width = 3),
+          valueBoxOutput("model_rsq", width = 3)
+        ),
+        fluidRow(
+          box(title = "Summary Statistics", width = 12, status = "info", DTOutput("summary_table"))
+        )
+      ),
+      
+      # Scatterplots - selectable numerical with trend lines and CI
+      tabItem("scatter",
+        fluidRow(
+          box(
+            title = "Scatterplot Explorer (Numeric Variables)",
+            width = 12,
+            status = "info",
+            solidHeader = TRUE,
+            fluidRow(
+              column(3, selectInput("scatter_x", "X Variable:", choices = numeric_vars, selected = "trip_distance")),
+              column(3, selectInput("scatter_y", "Y Variable:", choices = numeric_vars, selected = "tip_amount")),
+              column(3, selectInput("scatter_color", "Color By:", choices = c("None", categorical_vars), selected = "None")),
+              column(3, checkboxInput("show_smooth", "Show LM Trend Line + 95% CI", value = TRUE))
+            ),
+            plotlyOutput("scatter_plot", height = "600px")
+          )
+        ),
+        fluidRow(
+          box(title = "How to Use", width = 12, status = "warning",
+              "Choose any numeric variables from the cleaned dataset. Enable trendline to see linear relationship and confidence band. Hover for details.")
+        )
+      ),
+      
+      # Boxplots - categorical with proper ordering
+      tabItem("boxplot",
+        fluidRow(
+          box(
+            title = "Boxplots by Categorical Variables",
+            width = 12,
+            status = "info",
+            solidHeader = TRUE,
+            fluidRow(
+              column(4, selectInput("box_x", "Group By (Categorical):", choices = categorical_vars, selected = "pickup_dow")),
+              column(4, selectInput("box_y", "Measure (Y):", choices = c("tip_amount", "tip_pct"), selected = "tip_amount")),
+              column(4, checkboxInput("box_order", "Order Categories by Median", value = TRUE))
+            ),
+            plotlyOutput("box_plot", height = "550px")
+          )
+        ),
+        fluidRow(
+          box(title = "Interpretation Note", width = 12, status = "warning",
+              "Boxplots show distribution of tips across categories. When ordered by median, patterns in tipping behavior become clear (e.g. which days or ratecodes have higher tips).")
+        )
+      ),
+      
+      # Histograms - interactive
+      tabItem("histogram",
+        fluidRow(
+          box(
+            title = "Interactive Histograms",
+            width = 12,
+            status = "info",
+            solidHeader = TRUE,
+            fluidRow(
+              column(4, selectInput("hist_var", "Variable to Plot:", choices = numeric_vars, selected = "tip_amount")),
+              column(4, sliderInput("hist_bins", "Bins:", min = 10, max = 80, value = 30, step = 5)),
+              column(4, selectInput("hist_color", "Fill By (Optional):", choices = c("None", categorical_vars), selected = "None"))
+            ),
+            plotlyOutput("hist_plot", height = "550px")
+          )
+        ),
+        fluidRow(
+          box(title = "Note", width = 12, status = "warning",
+              "Histograms are fully interactive with plotly - zoom, hover, and compare distributions by category.")
+        )
+      ),
+      
+      # Insights & Viz
+      tabItem("insights",
+        fluidRow(
+          box(title = "Tipping Patterns by Hour and Ratecode", width = 12,
+              selectInput("ratecode_filter", "Filter Ratecodes:", 
+                         choices = unique(taxi_data$RatecodeID), multiple = TRUE),
+              plotlyOutput("tip_viz", height = "500px")
+          )
+        ),
+        fluidRow(
+          box(title = "Group Summary", width = 12, DTOutput("insights_table"))
+        )
+      ),
+      
+      # Predictor
+      tabItem("predict",
+        fluidRow(
+          box(title = "Adjust Inputs for Prediction", width = 6, status = "primary",
+              sliderInput("trip_dist", "Trip Distance (miles)", 0, 30, value = 5, step = 0.1),
+              sliderInput("pickup_hr", "Pickup Hour of Day", 0, 23, value = 12),
+              selectInput("pass_count", "Passengers", choices = 1:6, selected = 1),
+              selectInput("ratecode", "Ratecode", choices = unique(taxi_data$RatecodeID), selected = "1"),
+              checkboxInput("is_weekend", "Weekend Trip?", FALSE),
+              actionButton("predict_btn", "Get Prediction", class = "btn-lg btn-success")
+          ),
+          box(title = "Results", width = 6, status = "info",
+              verbatimTextOutput("pred_output"),
+              h4("Model Summary"),
+              verbatimTextOutput("model_summary")
+          )
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Reactive filtered data for Overview tab
+  overview_data <- reactive({
+    taxi_data
+  })
+
+  # Value boxes for overview
+  output$n_trips <- renderValueBox({
+    valueBox(value = format(nrow(taxi_data), big.mark = ","), subtitle = "Total Trips", icon = icon("taxi"), color = "primary")
+  })
+  
+  output$avg_tip <- renderValueBox({
+    avg_val <- round(mean(taxi_data$tip_amount, na.rm = TRUE), 2)
+    valueBox(value = paste0("$", avg_val), subtitle = "Average Tip", icon = icon("dollar-sign"), color = "success")
+  })
+  
+  output$avg_tip_pct <- renderValueBox({
+    pct_val <- round(mean(taxi_data$tip_pct, na.rm = TRUE) * 100, 1)
+    valueBox(value = paste0(pct_val, "%"), subtitle = "Average Tip %", icon = icon("percent"), color = "info")
+  })
+  
+  output$model_rsq <- renderValueBox({
+    rsq <- round(summary(model_fit)$r.squared, 3)
+    valueBox(value = rsq, subtitle = "Model R²", icon = icon("chart-line"), color = "warning")
+  })
+  
+  # Summary table
+  output$summary_table <- renderDT({
+    summary_stats <- taxi_data |> 
+      select(where(is.numeric)) |> 
+      summarise(across(everything(), list(
+        Mean = ~round(mean(.x, na.rm = TRUE), 2),
+        SD = ~round(sd(.x, na.rm = TRUE), 2),
+        Min = ~round(min(.x, na.rm = TRUE), 2),
+        Max = ~round(max(.x, na.rm = TRUE), 2)
+      ), .names = "{.col}.{.fn}")) |> 
+      pivot_longer(everything(), names_to = c("Variable", ".value"), names_sep = "\\.")
+    datatable(summary_stats)
+  })
+  
+  # Scatterplot output
+  output$scatter_plot <- renderPlotly({
+    p <- ggplot(taxi_data, aes(x = !!sym(input$scatter_x), y = !!sym(input$scatter_y)))
+    if (input$scatter_color != "None") {
+      p <- p + aes(color = !!sym(input$scatter_color))
+    }
+    p <- p + geom_point(alpha = 0.7, size = 2)
+    if (input$show_smooth) {
+      p <- p + geom_smooth(method = "lm", se = TRUE)
+    }
+    p <- p + labs(title = paste(input$scatter_y, "vs", input$scatter_x), x = input$scatter_x, y = input$scatter_y)
+    ggplotly(p) |> layout(legend = list(orientation = "h", y = -0.2))
+  })
+  
+  # Boxplot output
+  output$box_plot <- renderPlotly({
+    data <- taxi_data
+    if (input$box_order) {
+      data <- data |> mutate(!!sym(input$box_x) := fct_reorder(factor(!!sym(input$box_x)), !!sym(input$box_y), median, na.rm = TRUE))
+    }
+    p <- ggplot(data, aes(x = !!sym(input$box_x), y = !!sym(input$box_y), fill = !!sym(input$box_x))) +
+      geom_boxplot(outlier.alpha = 0.4) +
+      labs(title = paste("Boxplot of", input$box_y, "by", input$box_x), x = input$box_x, y = input$box_y)
+    ggplotly(p)
+  })
+  
+  # Histogram output
+  output$hist_plot <- renderPlotly({
+    p <- ggplot(taxi_data, aes(x = !!sym(input$hist_var)))
+    if (input$hist_color == "None") {
+      p <- p + geom_histogram(bins = input$hist_bins, alpha = 0.8, fill = "blue")
+    } else {
+      p <- p + geom_histogram(bins = input$hist_bins, alpha = 0.8, aes(fill = !!sym(input$hist_color)), position = "dodge")
+    }
+    p <- p + labs(title = paste("Histogram of", input$hist_var), x = input$hist_var, y = "Count")
+    ggplotly(p) |> layout(legend = list(orientation = "h", y = -0.2))
+  })
+  
+  output$tip_viz <- renderPlotly({
+    filtered <- taxi_data %>% filter(RatecodeID %in% input$ratecode_filter | length(input$ratecode_filter) == 0)
+    plot_ly(filtered, x = ~pickup_hour, y = ~tip_amount, type = "scatter", mode = "markers") %>%
+      layout(title = "Tip Amount by Pickup Hour")
+  })
+  
+  output$insights_table <- renderDT({
+    group_summary <- taxi_data |> group_by(RatecodeID) |> summarise(avg_tip = round(mean(tip_amount), 2), avg_pct = round(mean(tip_pct)*100, 1))
+    datatable(group_summary)
+  })
+  
+  observeEvent(input$predict_btn, {
+    new_data <- data.frame(
+      trip_distance = input$trip_dist,
+      pickup_hour = input$pickup_hr,
+      passenger_count = as.integer(input$pass_count),
+      RatecodeID = as.factor(input$ratecode),
+      weekend = input$is_weekend
+    )
+    pred <- predict(model_fit, newdata = new_data)
+    output$pred_output <- renderText(paste("Predicted Tip: $", round(pred, 2)))
+  })
+  
+  output$model_summary <- renderPrint({
+    summary(model_fit)
+  })
+}
+shinyApp(ui, server)

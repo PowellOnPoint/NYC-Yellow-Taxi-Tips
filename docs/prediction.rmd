@@ -326,3 +326,8 @@ summary_stats |> knitr::kable(
 
 # App exports
 
+```{r}
+saveRDS(ds, here::here("taxi-tips-shiny", "taxi_cleaned.rds"))
+saveRDS(a_model, here::here("taxi-tips-shiny", "tip_model.rds"))
+list.files(here::here("taxi-tips-shiny"), pattern = "\\.rds$")
+```
