@@ -1,4 +1,67 @@
-Insight 1: Tips are higher for longer trips and in certain Ratecodes like JFK airport.
-Insight 2: Nighttime and weekend trips in entertainment zones show higher tip percentages.
-The linear model shows trip_distance as the strongest predictor with positive coefficient.
-From EDA: Average tip is about $4.31 with 17.3% tip rate.
+# NYC Yellow Taxi Tips Project - Knowledge Base for RAG
+# MSDS 6306 Doing Data Science - PowellOnPoint Team
+# Created for Shiny App natural language interface (HF-powered RAG)
+# Source: Project spec (taxi_project_v2.docx), course syllabus, GitHub repo, and team analysis
+
+CHUNK_01_PROJECT_OVERVIEW
+This is an MSDS 6306 final project titled "Predicting NYC Yellow Taxi Tips". 
+The dual goals are: (1) build a linear regression model to predict tip_amount that achieves RMSE ≤ 2 and MAE ≤ 1.5, and (2) develop at least two meaningful, non-trivial insights into when, why, and how much riders tip in NYC Yellow Taxis. 
+We study only Yellow Taxi data for one full calendar year, loaded via arrow::read_parquet(). A focused subset (e.g., specific zones or times) is used when it improves insight quality and model performance. The project follows the data science pipeline: Import, Tidy, Transform, Visualize, Model, Communicate.
+
+CHUNK_02_DATA_AND_SCOPE
+Data source: https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page (Yellow Taxi trip records in Parquet format). 
+We use one full calendar year of Yellow Taxi data only. 
+No minimum sample size; quality of insights and model matters more than quantity. 
+Tip-related variables are carefully defined and cleaned (tip_amount is the target). 
+Analysis may focus on subsets such as Manhattan zones, credit-card trips, or specific times of day to produce stronger insights.
+
+CHUNK_03_INSIGHTS_REQUIREMENT
+The project requires at least two high-quality insights on tipping behavior. 
+Insights must go beyond description: explain when tips are higher/lower, where they differ across zones, how trip characteristics relate to tipping (and whether relationships depend on other factors), and how payment or fare patterns associate with tip levels. 
+Each insight is supported by careful analysis, visualizations, and thoughtful interpretation of why the pattern matters.
+
+CHUNK_04_MODEL_REQUIREMENTS
+We must build a linear regression model (methods limited to those studied in MSDS 6306) to predict tip_amount. 
+The model must meet: RMSE ≤ 2 and MAE ≤ 1.5 on appropriate evaluation. 
+We address linear regression assumptions (linearity, residual normality, homoscedasticity, independence, multicollinearity via VIF), handle outliers, perform feature engineering (e.g., interactions, logs, time bins, fare_per_mile), and document variable selection (often via EDA).
+
+CHUNK_05_SHINY_APP_REQUIREMENTS
+We built an RShiny dashboard with: clear professional design, interactive visualizations and controls (filters for zones, time, payment type, etc.), display of analysis and model results, and a natural language question-answering feature powered by RAG using Hugging Face as the LLM. 
+The RAG component answers questions about tipping patterns, model interpretation, differences across zones/times, and summaries of findings, grounded in our actual project materials.
+
+CHUNK_06_COURSE_CONTEXT_SYLLABUS
+This project is the final assignment in DS 6306: Doing Data Science at Southern Methodist University (MSDS program). 
+The course covers the full data science pipeline using R, tidyverse, arrow for Parquet, ggplot2/plotly, linear regression, and deployment with RShiny. 
+Students learn RAG (Retrieval-Augmented Generation) and implement it within projects. 
+All work must be reproducible, use GitHub, and follow tidy data principles. 
+Both team members must understand the entire analysis.
+
+CHUNK_07_REPO_STRUCTURE
+Repository: https://github.com/PowellOnPoint/NYC-Yellow-Taxi-Tips
+Structure includes: data/ (Parquet files), code/ (load_data.R, data_cleaning.R, eda_and_insights.R, modeling.R), shiny_app/ (app.R with RAG), outputs/, docs/.
+Code is organized and commented for reproducibility. 
+Recent work includes data loading with arrow, cleaning, EDA for insights, linear regression modeling, and Shiny app development with HF RAG.
+
+CHUNK_08_CURRENT_INSIGHTS_DRAFT
+Insight 1 (in development): Tips tend to be significantly higher for credit-card payments during evening rush hours, especially in Manhattan entertainment zones. This may reflect rider satisfaction, social norms, or convenience of digital tipping.
+Insight 2 (in development): There is a non-linear relationship between trip distance/fare_amount and tip amount that is moderated by passenger_count and time of day. Longer trips with higher fares per mile show different tipping behavior depending on the number of passengers and whether the trip occurs during peak vs off-peak hours.
+
+CHUNK_09_MODEL_SUMMARY_PLACEHOLDER
+Our linear regression model predicts tip_amount using features such as trip_distance, fare_amount (or fare_per_mile), passenger_count, pickup_hour, pickup_dow, airport indicator, payment_type, and selected interactions/logs. 
+Feature engineering and variable selection were guided by EDA. 
+Diagnostics (residual plots, Q-Q, VIF) were checked and assumptions addressed where possible. 
+Current performance targets: RMSE ≤ 2, MAE ≤ 1.5 (final values saved in model.rds).
+
+CHUNK_10_RAG_GUIDANCE
+When answering user questions in the Shiny app, always ground responses in this knowledge base and our actual analysis/model. 
+Do not speculate beyond the project. 
+Useful example questions: "Why are tips higher at night?", "Interpret the effect of trip_distance on tips", "Summarize the two main insights", "How does payment type affect tipping?".
+
+CHUNK_11_SYLLABUS_KEY_OUTCOMES
+From the DS 6306 syllabus: Students learn to import/tidy/transform/visualize/model/communicate data, conduct EDA, apply linear regression, deploy with RShiny, and implement RAG. 
+The course emphasizes reproducible research with R, GitHub, and clear scientific communication. 
+Generative AI (including HF models) is encouraged as a collaborator after mastering the underlying methods.
+
+# End of Knowledge Base
+# Total chunks: 11 (optimized for fast retrieval in our RAG pipeline)
+# Update this file as we finalize exact insights, model coefficients, RMSE/MAE values, and specific year/subset used.

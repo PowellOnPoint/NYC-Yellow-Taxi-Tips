@@ -11,7 +11,11 @@ library(DT)
 library(dplyr)
 library(forcats)
 library(httr2)
-library(tidyr)        # Added for pivot_longer        
+library(jsonlite)
+library(tidyr)        # Added for pivot_longer
+library(dotenv)       # Added for .env loading
+
+load_dot_env()        # Load environment variables from .env
 
 # Load pre-processed assets (now in app directory)
 taxi_data <- readRDS("taxi_cleaned.rds")  
@@ -27,20 +31,67 @@ categorical_vars <- c("pickup_dow", "RatecodeID", "passenger_count", "weekend",
                       "rush_hour", "airport", "VendorID", "overnight", "PULocationID",
                       "DOLocationID")
 
-# Simple embedding/retrieval helper
-get_relevant_context <- function(query, chunks = knowledge_chunks, top_k = 3) {
-  scores <- sapply(chunks, function(c) sum(stringr::str_detect(tolower(c), tolower(strsplit(query, " ")[[1]]))))
-  top_idx <- order(scores, decreasing = TRUE)[1:top_k]
-  paste(chunks[top_idx], collapse = "\n\n")
+knowledge_base <- paste(knowledge_chunks, collapse = "\n")
+chunks <- strsplit(knowledge_base, "\n\n")[[1]]
+
+# Function to get embeddings via HF API
+get_embeddings <- function(texts) {
+  if (is.character(texts)) texts <- as.list(texts)
+  
+  token <- Sys.getenv("HF_TOKEN", "YOUR_HF_TOKEN")
+  if (token == "YOUR_HF_TOKEN") {
+    warning("HF_TOKEN not set in .env file")
+    return(list())
+  }
+  
+  req <- request("https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2") %>%
+    req_headers(Authorization = paste("Bearer", token)) %>%
+    req_body_json(list(inputs = texts))
+  
+  tryCatch({
+    resp <- req_perform(req)
+    resp_body_json(resp)
+  }, error = function(e) {
+    warning("HF embeddings API error: ", e$message)
+    list()  # fallback
+  })
 }
 
-# HF LLM call (replace YOUR_HF_TOKEN with env var for production)
-call_hf_llm <- function(prompt, model = "mistralai/Mistral-7B-Instruct-v0.3") {
+# Precompute embeddings for chunks (run once at app start)
+chunk_embeddings <- get_embeddings(chunks)
+
+# Cosine similarity function
+cosine_similarity <- function(a, b) {
+  if (length(a) == 0 || length(b) == 0) return(0)
+  sum(a * b) / (sqrt(sum(a^2)) * sqrt(sum(b^2)))
+}
+
+# Simple embedding/retrieval helper
+get_relevant_context <- function(query, top_k = 3) {
+  if (length(chunk_embeddings) == 0) {
+    # Fallback to keyword matching
+    scores <- sapply(chunks, function(c) sum(stringr::str_detect(tolower(c), tolower(strsplit(query, " ")[[1]]))))
+    top_idx <- order(scores, decreasing = TRUE)[1:top_k]
+    return(paste(chunks[top_idx], collapse = "\n"))
+  }
+  query_emb <- get_embeddings(list(query))[[1]]
+  if (is.null(query_emb)) {
+    # Fallback
+    scores <- sapply(chunks, function(c) sum(stringr::str_detect(tolower(c), tolower(strsplit(query, " ")[[1]]))))
+    top_idx <- order(scores, decreasing = TRUE)[1:top_k]
+    return(paste(chunks[top_idx], collapse = "\n"))
+  }
+  similarities <- sapply(chunk_embeddings, function(ce) cosine_similarity(query_emb, ce))
+  top_indices <- order(similarities, decreasing = TRUE)[1:min(top_k, length(chunks))]
+  paste(chunks[top_indices], collapse = "\n")
+}
+
+# HF LLM call
+call_hf_llm <- function(prompt, model = "google/flan-t5-small") {
   req <- request("https://api-inference.huggingface.co/models/") %>%
     req_url_path_append(model) %>%
-    req_headers("Authorization" = paste("Bearer", Sys.getenv("HF_TOKEN", "YOUR_HF_TOKEN"))) %>%  
-    req_body_json(list(inputs = prompt, parameters = list(max_new_tokens = 300, temperature = 0.7)))
-  
+    req_headers("Authorization" = paste("Bearer", Sys.getenv("HF_TOKEN", "YOUR_HF_TOKEN"))) %>%
+    req_body_json(list(inputs = prompt, parameters = list(max_new_tokens = 100, temperature = 0.7)))
   tryCatch({
     resp <- req_perform(req)
     content <- resp_body_json(resp)
@@ -59,7 +110,8 @@ ui <- dashboardPage(
       menuItem("Boxplots", tabName = "boxplot", icon = icon("box")),
       menuItem("Histograms", tabName = "histogram", icon = icon("chart-bar")),
       menuItem("Insights & Viz", tabName = "insights", icon = icon("lightbulb")),
-      menuItem("Tip Predictor", tabName = "predict", icon = icon("calculator"))
+      menuItem("Tip Predictor", tabName = "predict", icon = icon("calculator")),
+      menuItem("Ask Taxi Driver", tabName = "ask", icon = icon("question"))
     )
   ),
   dashboardBody(
@@ -188,6 +240,16 @@ ui <- dashboardPage(
               verbatimTextOutput("pred_output")
           )
         )
+      ),
+      # Ask Taxi Driver
+      tabItem("ask",
+        fluidRow(
+          box(title = "Ask the Taxi Driver", width = 12, status = "primary",
+              textInput("question", "Ask a question about NYC taxi tips:"),
+              actionButton("submit", "Submit"),
+              verbatimTextOutput("response")
+          )
+        )
       )
     )
   )
@@ -298,5 +360,17 @@ server <- function(input, output, session) {
     predicted_tip()
   })
   
+  # Ask Taxi Driver RAG reactive
+  ask_response <- eventReactive(input$submit, {
+    context <- get_relevant_context(input$question)
+    prompt <- paste0("Please answer the question based on the context.\nContext: ", context, "\nQuestion: ", input$question)
+    call_hf_llm(prompt)
+  })
+  
+  output$response <- renderText({
+    ask_response()
+  })
+  
 }
+
 shinyApp(ui, server)
