@@ -1,0 +1,10 @@
+name: taxi-tips
+title:
+username: powellonpoint
+account: powellonpoint
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17162074
+bundleId: 11866320
+url: https://powellonpoint.shinyapps.io/taxi-tips/
+version: 1

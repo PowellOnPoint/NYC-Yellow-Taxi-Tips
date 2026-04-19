@@ -82,6 +82,7 @@ par(mfrow = c(2, 2))
 plot(full_model)
 plot(slr)
 plot(a_model)
+plot(b_model)
 par(mfrow = c(1,1))
 
 # Histogram with normal distribution overlaid
@@ -122,6 +123,19 @@ curve(dnorm(x, mean = mean(a_model$residuals), sd = sd(a_model$residuals)),
       add = TRUE, 
       col = "red", 
       lwd = 2)
+
+# Histogram with normal distribution overlaid
+hist(b_model$residuals, 
+     probability = TRUE,          # Use density scale
+     main = "Histogram of Residuals (A Model)",
+     xlab = "Residuals",
+     col = "lightblue",
+     border = "black")
+# Add normal curve
+curve(dnorm(x, mean = mean(b_model$residuals), sd = sd(b_model$residuals)), 
+      add = TRUE, 
+      col = "red", 
+      lwd = 2)
 ```
 
 Results are not perfect, there's some skewness in normality and zero tip annotated in the dataset are only slightly in disagreeance with assuming a constant variance among predictor variables. Outliers have been appropriately addressed while leaving room for influence in the model.
@@ -140,7 +154,6 @@ comparison_table <- map_dfr(list(
   ), ~ {
     g <- broom::glance(.x)
     tibble(
-      Model = names(which(map_lgl(list(full_model, slr, a_model, b_model), identical, .x))),
       Observations = g$nobs,
       `R²` = round(g$r.squared, 4),
       `Adj. R²` = round(g$adj.r.squared, 4),
@@ -149,7 +162,7 @@ comparison_table <- map_dfr(list(
       `p-value` = format.pval(g$p.value, digits = 3, eps = 0.001),
       `Residual Df` = g$df.residual
     )
-  }, .id = NULL)
+  }, .id = "Model")
 
 comparison_table |>
   knitr::kable(

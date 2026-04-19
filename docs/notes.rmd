@@ -235,7 +235,7 @@ curve(dnorm(x, mean = mean(forward_model$residuals), sd = sd(forward_model$resid
 ```
 
 ```{r}
-mlr1 = lm(tip_amount ~ trip_distance + trip_duration_min + RatecodeID, data = train)
+mlr1 = lm(tip_amount ~ log(trip_distance) + log(trip_duration_min) + RatecodeID, data = train)
 summary(mlr1)
 
 par(mfrow = c(2, 2))

@@ -215,3 +215,36 @@ While there is evidence to suggest the mean tip percentage for flex_fare is diff
 Cash has a near zero mean tip amount, while credit card tips have a mean tip amount of approximately $4.30 and flex fare tips have a mean tip amount of approximately $0.39. 
 
 We will focus on credit card tips for the rest of our analysis due to the confounding variables in cash and flex fare tips.
+
+```{r}
+rush_true <- cleaned_sample |> filter(rush_hour)
+rush_false <- cleaned_sample |> filter(!rush_hour)
+
+var.test(rush_true$tip_amount, rush_false$tip_amount)
+
+t.test(rush_true$tip_amount, rush_false$tip_amount)
+```
+There's a statistically significant difference in mean tip amounts between rush hour and non-rush hour trips (Welch's t-test p < 0.001).
+
+```{r}
+cleaned_sample |> 
+  summarize(
+    count_below = sum(trip_duration_min < mean(trip_duration_min)),
+    total = n(),
+    pct = count_below / total * 100
+  )
+
+below_avg <- cleaned_sample |> filter(trip_duration_min < mean(trip_duration_min))
+above_avg <- cleaned_sample |> filter(trip_duration_min >= mean(trip_duration_min))
+
+t.test(below_avg$tip_amount, above_avg$tip_amount)
+t.test(below_avg$tip_amount, cleaned_sample$tip_amount)
+
+standard <- cleaned_sample |> filter(RatecodeID == "Standard")
+others <- cleaned_sample |> filter(RatecodeID != "Standard")
+
+var.test(standard$tip_amount, others$tip_amount)
+
+t.test(standard$tip_amount, others$tip_amount)
+
+```
